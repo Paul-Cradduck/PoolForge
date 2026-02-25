@@ -19,6 +19,12 @@ func (r *raidManager) CreateArray(opts RAIDCreateOpts) (*RAIDArrayInfo, error) {
 		metaVer = "1.2"
 	}
 
+	// Wipe any stale signatures on member devices to prevent "Device or resource busy"
+	for _, m := range opts.Members {
+		exec.Command("wipefs", "-af", m).Run()
+	}
+	exec.Command("udevadm", "settle").Run()
+
 	args := []string{
 		"--create", dev,
 		"--level", strconv.Itoa(opts.Level),

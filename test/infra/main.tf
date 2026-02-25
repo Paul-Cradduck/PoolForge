@@ -17,7 +17,7 @@ data "aws_ami" "ubuntu" {
 
   filter {
     name   = "name"
-    values = ["ubuntu/images/hvm-ssd/ubuntu-noble-24.04-amd64-server-*"]
+    values = ["ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*"]
   }
 
   filter {
@@ -28,6 +28,7 @@ data "aws_ami" "ubuntu" {
 
 resource "aws_security_group" "poolforge_test" {
   name_prefix = "poolforge-test-${var.run_id}-"
+  vpc_id      = var.vpc_id
 
   ingress {
     from_port   = 22
@@ -51,10 +52,12 @@ resource "aws_security_group" "poolforge_test" {
 }
 
 resource "aws_instance" "test" {
-  ami                    = data.aws_ami.ubuntu.id
-  instance_type          = var.instance_type
-  key_name               = var.key_name
-  vpc_security_group_ids = [aws_security_group.poolforge_test.id]
+  ami                         = data.aws_ami.ubuntu.id
+  instance_type               = var.instance_type
+  key_name                    = var.key_name
+  vpc_security_group_ids      = [aws_security_group.poolforge_test.id]
+  subnet_id                   = var.subnet_id
+  associate_public_ip_address = true
 
   root_block_device {
     volume_size = 20

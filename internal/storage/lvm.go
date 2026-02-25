@@ -12,7 +12,7 @@ type lvmManager struct{}
 func NewLVMManager() LVMManager { return &lvmManager{} }
 
 func (l *lvmManager) CreatePhysicalVolume(device string) error {
-	if out, err := exec.Command("pvcreate", "-f", device).CombinedOutput(); err != nil {
+	if out, err := exec.Command("pvcreate", "-ff", "-y", device).CombinedOutput(); err != nil {
 		return fmt.Errorf("pvcreate %s: %w\n%s", device, err, out)
 	}
 	return nil
@@ -28,7 +28,7 @@ func (l *lvmManager) CreateVolumeGroup(name string, pvDevices []string) error {
 
 func (l *lvmManager) CreateLogicalVolume(vgName, lvName string, sizePercent int) error {
 	arg := fmt.Sprintf("%d%%FREE", sizePercent)
-	if out, err := exec.Command("lvcreate", "-l", arg, "-n", lvName, vgName).CombinedOutput(); err != nil {
+	if out, err := exec.Command("lvcreate", "-y", "-l", arg, "-n", lvName, vgName).CombinedOutput(); err != nil {
 		return fmt.Errorf("lvcreate %s/%s: %w\n%s", vgName, lvName, err, out)
 	}
 	return nil

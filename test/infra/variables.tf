@@ -1,5 +1,5 @@
 variable "region" {
-  default = "us-east-1"
+  default = "us-east-2"
 }
 
 variable "instance_type" {
@@ -19,4 +19,14 @@ variable "volume_sizes" {
   description = "EBS volume sizes in GB (mixed sizes for SHR testing)"
   type        = list(number)
   default     = [1, 2, 2, 3, 4, 10]
+}
+
+variable "vpc_id" {
+  description = "VPC ID to launch into"
+  default     = ""
+}
+
+variable "subnet_id" {
+  description = "Subnet ID to launch into (must be public)"
+  default     = ""
 }

@@ -16,11 +16,16 @@ func (d *diskManager) GetDiskInfo(device string) (*DiskInfoResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("blockdev %s: %w", device, err)
 	}
-	size, err := strconv.ParseUint(strings.TrimSpace(string(out)), 10, 64)
+	rawSize, err := strconv.ParseUint(strings.TrimSpace(string(out)), 10, 64)
 	if err != nil {
 		return nil, fmt.Errorf("parse size for %s: %w", device, err)
 	}
-	return &DiskInfoResult{Device: device, CapacityBytes: size}, nil
+	// Subtract GPT overhead: 1MiB alignment at start + 1MiB backup GPT at end
+	const gptOverhead = 2 * 1024 * 1024
+	usable := rawSize - gptOverhead
+	// Align down to 1MiB boundary
+	usable = (usable / (1024 * 1024)) * (1024 * 1024)
+	return &DiskInfoResult{Device: device, CapacityBytes: usable}, nil
 }
 
 func (d *diskManager) CreateGPTPartitionTable(device string) error {
@@ -30,11 +35,12 @@ func (d *diskManager) CreateGPTPartitionTable(device string) error {
 	if err := exec.Command("sgdisk", "--clear", device).Run(); err != nil {
 		return fmt.Errorf("sgdisk clear %s: %w", device, err)
 	}
+	exec.Command("partprobe", device).Run()
+	exec.Command("udevadm", "settle").Run()
 	return nil
 }
 
 func (d *diskManager) CreatePartition(device string, start, size uint64) (*Partition, error) {
-	// Convert bytes to 512-byte sectors
 	startSector := start / 512
 	endSector := (start+size)/512 - 1
 
@@ -43,9 +49,15 @@ func (d *diskManager) CreatePartition(device string, start, size uint64) (*Parti
 	num := len(parts) + 1
 
 	arg := fmt.Sprintf("%d:%d:%d", num, startSector, endSector)
-	if err := exec.Command("sgdisk", "--new", arg, device).Run(); err != nil {
-		return nil, fmt.Errorf("sgdisk new partition %s: %w", device, err)
+	cmd := exec.Command("sgdisk", "--new", arg, device)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return nil, fmt.Errorf("sgdisk new partition %s: %w\n%s", device, err, out)
 	}
+
+	// Inform kernel of partition table changes
+	exec.Command("partprobe", device).Run()
+	// Brief settle time for udev
+	exec.Command("udevadm", "settle").Run()
 
 	partDev := partitionDevice(device, num)
 	return &Partition{Number: num, Device: partDev, Start: start, Size: size}, nil
