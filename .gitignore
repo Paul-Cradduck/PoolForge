@@ -1,0 +1,18 @@
+# Binary
+/poolforge
+
+# Terraform
+test/infra/.terraform/
+test/infra/*.tfstate*
+test/infra/.terraform.lock.hcl
+test/infra/test_results_*.log
+
+# Go
+vendor/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store

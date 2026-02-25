@@ -1,0 +1,262 @@
+package engine
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"time"
+
+	"github.com/poolforge/poolforge/internal/storage"
+)
+
+type engineImpl struct {
+	disk storage.DiskManager
+	raid storage.RAIDManager
+	lvm  storage.LVMManager
+	fs   storage.FilesystemManager
+	meta MetadataStore
+}
+
+func NewEngine(disk storage.DiskManager, raid storage.RAIDManager, lvm storage.LVMManager, fs storage.FilesystemManager, meta MetadataStore) EngineService {
+	return &engineImpl{disk: disk, raid: raid, lvm: lvm, fs: fs, meta: meta}
+}
+
+func (e *engineImpl) CreatePool(ctx context.Context, req CreatePoolRequest) (*Pool, error) {
+	// Validate minimum disk count
+	if len(req.Disks) < 2 {
+		return nil, fmt.Errorf("minimum 2 disks required, got %d", len(req.Disks))
+	}
+
+	// Check for duplicate disks in request
+	seen := make(map[string]bool)
+	for _, d := range req.Disks {
+		if seen[d] {
+			return nil, fmt.Errorf("duplicate disk %s in request", d)
+		}
+		seen[d] = true
+	}
+
+	// Check disk conflicts with existing pools
+	existing, _ := e.meta.ListPools()
+	for _, ps := range existing {
+		p, err := e.meta.LoadPool(ps.ID)
+		if err != nil {
+			continue
+		}
+		for _, ed := range p.Disks {
+			if seen[ed.Device] {
+				return nil, fmt.Errorf("disk %s is already a member of pool %q", ed.Device, p.Name)
+			}
+		}
+	}
+
+	// Check name uniqueness
+	for _, ps := range existing {
+		if ps.Name == req.Name {
+			return nil, fmt.Errorf("pool name %q already exists", req.Name)
+		}
+	}
+
+	// Get disk capacities
+	var disks []DiskInfo
+	var capacities []uint64
+	for _, dev := range req.Disks {
+		info, err := e.disk.GetDiskInfo(dev)
+		if err != nil {
+			return nil, fmt.Errorf("cannot read disk %s: %w", dev, err)
+		}
+		disks = append(disks, DiskInfo{Device: dev, CapacityBytes: info.CapacityBytes, State: DiskHealthy})
+		capacities = append(capacities, info.CapacityBytes)
+	}
+
+	// Compute capacity tiers
+	tiers := ComputeCapacityTiers(capacities)
+	if len(tiers) == 0 {
+		return nil, fmt.Errorf("no valid capacity tiers could be computed")
+	}
+
+	poolID := generateID()
+	now := time.Now()
+
+	// Partition each disk
+	for i := range disks {
+		if err := e.disk.CreateGPTPartitionTable(disks[i].Device); err != nil {
+			return nil, err
+		}
+		slices := ComputeDiskSlices(disks[i].CapacityBytes, tiers)
+		var offset uint64 = 1048576 // 1 MiB alignment offset
+		for _, sl := range slices {
+			part, err := e.disk.CreatePartition(disks[i].Device, offset, sl.SizeBytes)
+			if err != nil {
+				return nil, err
+			}
+			disks[i].Slices = append(disks[i].Slices, SliceInfo{
+				TierIndex:       sl.TierIndex,
+				PartitionNumber: part.Number,
+				PartitionDevice: part.Device,
+				SizeBytes:       sl.SizeBytes,
+			})
+			offset += sl.SizeBytes
+		}
+	}
+
+	// Create RAID arrays per tier
+	var arrays []RAIDArray
+	mdIndex := findNextMDIndex()
+	for ti := range tiers {
+		var members []string
+		for _, d := range disks {
+			for _, sl := range d.Slices {
+				if sl.TierIndex == tiers[ti].Index {
+					members = append(members, sl.PartitionDevice)
+				}
+			}
+		}
+		raidLevel, err := SelectRAIDLevel(req.ParityMode, len(members))
+		if err != nil {
+			return nil, err
+		}
+		mdName := fmt.Sprintf("md%d", mdIndex)
+		mdIndex++
+		info, err := e.raid.CreateArray(storage.RAIDCreateOpts{
+			Name:            mdName,
+			Level:           raidLevel,
+			Members:         members,
+			MetadataVersion: "1.2",
+		})
+		if err != nil {
+			return nil, err
+		}
+		tiers[ti].RAIDArray = info.Device
+		arrays = append(arrays, RAIDArray{
+			Device:    info.Device,
+			RAIDLevel: raidLevel,
+			TierIndex: tiers[ti].Index,
+			State:     ArrayHealthy,
+			Members:   members,
+		})
+	}
+
+	// LVM: create PVs, VG, LV
+	vgName := fmt.Sprintf("vg_poolforge_%s", poolID[:8])
+	lvName := fmt.Sprintf("lv_poolforge_%s", poolID[:8])
+	var pvDevices []string
+	for _, a := range arrays {
+		if err := e.lvm.CreatePhysicalVolume(a.Device); err != nil {
+			return nil, err
+		}
+		pvDevices = append(pvDevices, a.Device)
+	}
+	if err := e.lvm.CreateVolumeGroup(vgName, pvDevices); err != nil {
+		return nil, err
+	}
+	if err := e.lvm.CreateLogicalVolume(vgName, lvName, 100); err != nil {
+		return nil, err
+	}
+
+	// Create ext4 filesystem
+	lvPath := fmt.Sprintf("/dev/%s/%s", vgName, lvName)
+	if err := e.fs.CreateFilesystem(lvPath); err != nil {
+		return nil, err
+	}
+
+	// Mount
+	mountPoint := fmt.Sprintf("/mnt/poolforge/%s", req.Name)
+	if err := e.fs.MountFilesystem(lvPath, mountPoint); err != nil {
+		return nil, err
+	}
+
+	pool := &Pool{
+		ID:            poolID,
+		Name:          req.Name,
+		ParityMode:    req.ParityMode,
+		State:         PoolHealthy,
+		Disks:         disks,
+		CapacityTiers: tiers,
+		RAIDArrays:    arrays,
+		VolumeGroup:   vgName,
+		LogicalVolume: lvName,
+		MountPoint:    mountPoint,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+
+	if err := e.meta.SavePool(pool); err != nil {
+		return nil, fmt.Errorf("save metadata: %w", err)
+	}
+	return pool, nil
+}
+
+func (e *engineImpl) GetPool(ctx context.Context, poolID string) (*Pool, error) {
+	return e.meta.LoadPool(poolID)
+}
+
+func (e *engineImpl) ListPools(ctx context.Context) ([]PoolSummary, error) {
+	summaries, err := e.meta.ListPools()
+	if err != nil {
+		return nil, err
+	}
+	// Enrich with capacity info where possible
+	for i, s := range summaries {
+		p, err := e.meta.LoadPool(s.ID)
+		if err != nil {
+			continue
+		}
+		usage, err := e.fs.GetUsage(p.MountPoint)
+		if err == nil {
+			summaries[i].TotalCapacityBytes = usage.TotalBytes
+			summaries[i].UsedCapacityBytes = usage.UsedBytes
+		}
+	}
+	return summaries, nil
+}
+
+func (e *engineImpl) GetPoolStatus(ctx context.Context, poolID string) (*PoolStatus, error) {
+	pool, err := e.meta.LoadPool(poolID)
+	if err != nil {
+		return nil, err
+	}
+
+	status := &PoolStatus{Pool: *pool}
+	for _, a := range pool.RAIDArrays {
+		status.ArrayStatuses = append(status.ArrayStatuses, ArrayStatus{
+			Device: a.Device, RAIDLevel: a.RAIDLevel, TierIndex: a.TierIndex,
+			State: a.State, CapacityBytes: a.CapacityBytes, Members: a.Members,
+		})
+	}
+	for _, d := range pool.Disks {
+		var contributing []string
+		for _, sl := range d.Slices {
+			for _, a := range pool.RAIDArrays {
+				if a.TierIndex == sl.TierIndex {
+					contributing = append(contributing, a.Device)
+				}
+			}
+		}
+		status.DiskStatuses = append(status.DiskStatuses, DiskStatusInfo{
+			Device: d.Device, State: d.State, ContributingArrays: contributing,
+		})
+	}
+	return status, nil
+}
+
+func generateID() string {
+	// Simple UUID-like ID
+	b := make([]byte, 16)
+	// Use crypto/rand in production; for now use time-based
+	now := time.Now().UnixNano()
+	for i := 0; i < 8; i++ {
+		b[i] = byte(now >> (i * 8))
+	}
+	return fmt.Sprintf("%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:])
+}
+
+func findNextMDIndex() int {
+	for i := 0; i < 256; i++ {
+		dev := fmt.Sprintf("/dev/md%d", i)
+		if _, err := os.Stat(dev); err != nil {
+			return i
+		}
+	}
+	return 0
+}
