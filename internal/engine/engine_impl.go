@@ -243,6 +243,12 @@ func (e *engineImpl) GetPoolStatus(ctx context.Context, poolID string) (*PoolSta
 	// Auto-expand when all reshapes complete
 	if pool.State == PoolExpanding && !anyReshaping {
 		lvPath := fmt.Sprintf("/dev/%s/%s", pool.VolumeGroup, pool.LogicalVolume)
+		// Restore any PV headers destroyed by reshape
+		for _, a := range pool.RAIDArrays {
+			if !e.lvm.CheckPhysicalVolume(a.Device) {
+				e.lvm.RestoreMissingPV(pool.VolumeGroup, a.Device)
+			}
+		}
 		for _, a := range pool.RAIDArrays {
 			exec.Command("pvresize", a.Device).Run()
 		}

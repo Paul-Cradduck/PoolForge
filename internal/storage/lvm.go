@@ -91,3 +91,41 @@ func (l *lvmManager) RemovePhysicalVolume(device string) error {
 	}
 	return nil
 }
+
+func (l *lvmManager) CheckPhysicalVolume(device string) bool {
+	return exec.Command("pvs", device).Run() == nil
+}
+
+// RestoreMissingPV recreates a PV whose header was destroyed by mdadm reshape.
+// It reads the expected UUID from the VG backup, recreates the PV, and restores VG metadata.
+func (l *lvmManager) RestoreMissingPV(vgName string, device string) error {
+	// Parse the missing PV UUID from vgs output
+	out, err := exec.Command("vgs", "--noheadings", "-o", "pv_name,pv_uuid", vgName).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("vgs: %w\n%s", err, out)
+	}
+	var missingUUID string
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && (fields[0] == "[unknown]" || fields[0] == "unknown") {
+			missingUUID = fields[1]
+			break
+		}
+	}
+	if missingUUID == "" {
+		return fmt.Errorf("no missing PV found in VG %s", vgName)
+	}
+
+	restoreFile := fmt.Sprintf("/etc/lvm/backup/%s", vgName)
+	if out, err := exec.Command("pvcreate", "--uuid", missingUUID,
+		"--restorefile", restoreFile, "-ff", "-y", device).CombinedOutput(); err != nil {
+		return fmt.Errorf("pvcreate restore %s: %w\n%s", device, err, out)
+	}
+	if out, err := exec.Command("vgcfgrestore", vgName).CombinedOutput(); err != nil {
+		return fmt.Errorf("vgcfgrestore %s: %w\n%s", vgName, err, out)
+	}
+	if out, err := exec.Command("vgchange", "-ay", vgName).CombinedOutput(); err != nil {
+		return fmt.Errorf("vgchange %s: %w\n%s", vgName, err, out)
+	}
+	return nil
+}

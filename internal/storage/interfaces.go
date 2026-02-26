@@ -79,6 +79,8 @@ type LVMManager interface {
 	RemoveLogicalVolume(lvPath string) error
 	RemoveVolumeGroup(name string) error
 	RemovePhysicalVolume(device string) error
+	CheckPhysicalVolume(device string) bool
+	RestoreMissingPV(vgName string, device string) error
 }
 
 type VGInfo struct {
