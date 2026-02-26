@@ -59,72 +59,68 @@ Add `samba` and `nfs-kernel-server` to `install.sh` package list.
 **T17 — Test environment scripts**
 Create `test/aws-up.sh`, `test/aws-down.sh`, `test/aws-ssh.sh`, `test/aws-deploy.sh`. Automate EC2+EBS provisioning, binary deployment, and teardown. Write connection info to `/tmp/pf-test-env.json`.
 
-## Manual Validation Tests
+## Manual Validation Tests (via Web Portal)
+
+All manual testing is performed through the PoolForge web portal at `http://<instance-ip>:8080`. SSH is only used for initial setup and to generate client traffic for monitoring validation.
 
 **T18 — Share lifecycle testing**
 Environment: `./test/aws-up.sh --disks 3x10`
-1. Create pool with 3 disks
-2. Create SMB share, verify accessible from Windows/macOS/Linux client
-3. Create NFS share, verify mountable from Linux client with `mount -t nfs`
-4. Create dual-protocol share (SMB+NFS), verify both work
-5. Toggle read-only, verify writes blocked
-6. Toggle SMB browsing visibility, verify in network discovery
-7. Toggle guest access, verify unauthenticated access
-8. Update share protocols (remove SMB, keep NFS), verify SMB stops working
-9. Delete share with `--force`, verify directory and data removed
-10. Delete share without `--force`, verify confirmation prompt
+1. Create pool via portal
+2. Create SMB share via shares panel, connect from Windows/macOS client to verify
+3. Create NFS share via shares panel, mount from Linux client to verify
+4. Create dual-protocol share (SMB+NFS), verify both accessible
+5. Edit share: toggle read-only via portal, verify writes blocked from client
+6. Edit share: toggle SMB browsing visibility, verify in network discovery
+7. Edit share: toggle guest access, verify unauthenticated client access
+8. Edit share: remove SMB protocol (keep NFS), verify SMB stops working
+9. Delete share via portal, verify confirmation dialog shows directory size
+10. Confirm deletion, verify directory and data removed
 
 **T19 — User management testing**
-1. Create user via CLI, verify SMB login works
-2. Create user via web UI, verify SMB login works
-3. Create pool-scoped user, verify access limited to that pool
-4. Create global user, verify access to shares across multiple pools
-5. Delete user, verify SMB login rejected
-6. Verify POSIX file ownership matches user UID
+1. Create user via users panel (name + password field), verify SMB login works from client
+2. Create second user, verify both can access shares
+3. Create pool-scoped user, verify access limited to that pool's shares
+4. Create global-access user, verify access to shares across multiple pools
+5. Delete user via portal, verify SMB login rejected from client
 
 **T20 — NFS client restriction testing**
-1. Create NFS share with client restriction `192.168.x.0/24`
+1. Create NFS share via portal with client restriction field set to specific CIDR
 2. Verify access from allowed IP
-3. Verify access denied from disallowed IP (use second instance or different subnet)
-4. Update restriction to `*`, verify open access
+3. Verify access denied from disallowed IP
+4. Edit share via portal, change restriction to `*`, verify open access
 
 **T21 — Service lifecycle testing**
-1. Verify smbd/nmbd not running before any SMB shares exist
-2. Create first SMB share, verify smbd/nmbd started
-3. Delete last SMB share, verify smbd/nmbd stopped
-4. Same for nfs-server with NFS shares
-5. Verify services survive instance reboot
+1. Verify protocol status indicators show SMB ✗ / NFS ✗ before any shares
+2. Create first SMB share via portal, verify SMB indicator changes to ✓
+3. Delete last SMB share via portal, verify SMB indicator changes to ✗
+4. Same for NFS shares and NFS indicator
+5. Reboot instance, verify portal comes back with correct indicators
 
 **T22 — SMB configuration testing**
-1. Set custom workgroup in poolforge.conf, verify `smbclient -L` shows it
-2. Set custom server name, verify visible in network browsing
-3. Verify poolforge.conf include line in smb.conf
-4. Verify manual smb.conf edits outside poolforge section preserved
+1. Set custom workgroup via portal settings, verify reflected in SMB clients
+2. Set custom server name via portal settings, verify visible in network browsing
+3. Verify changes persist after portal refresh
 
 **T23 — Monitoring testing**
 Environment: `./test/aws-up.sh --disks 4x10,4x5,4x3`
-1. Create pool, create shares, connect SMB/NFS clients
-2. Open monitoring tab, verify disk IO gauges update in real-time
-3. Run `dd` write workload, verify write throughput gauge responds
-4. Verify network IO gauges show per-interface stats
-5. Verify SMB/NFS protocol breakdown gauges
-6. Verify client connection list shows connected users with correct IP/share/protocol
-7. Disconnect client, verify removed from list
-8. Wait 5+ minutes, verify ring buffer provides history on page reload
-9. Wait 2+ minutes, verify disk log file at `/var/lib/poolforge/metrics.log` has entries
-10. Query `/api/monitoring/history?range=5m`, verify returns data
+1. Create pool and shares via portal, connect SMB/NFS clients
+2. Open monitoring tab, verify disk IO gauges show real-time activity
+3. Generate write workload from client (large file copy), verify write throughput gauge responds
+4. Verify network IO gauges show per-interface in/out stats
+5. Verify SMB/NFS protocol breakdown gauges reflect active protocol traffic
+6. Verify client connection list shows connected users with correct IP, share, protocol, duration
+7. Disconnect client, verify removed from connection list
+8. Close and reopen monitoring tab, verify gauges show recent history (ring buffer)
+9. Verify historical data available after 2+ minutes of activity
 
-**T24 — Performance baseline**
-1. Run fio sequential read/write benchmarks on pool
-2. Verify monitoring gauges match fio reported throughput (within 10%)
-3. Run SMB file copy, verify network gauges reflect transfer
-4. Run NFS file copy, verify protocol breakdown is accurate
+**T24 — Performance validation**
+1. Copy large file via SMB to pool, observe monitoring gauges during transfer
+2. Copy large file via NFS to pool, verify protocol gauge shows NFS traffic
+3. Verify disk IO gauges correlate with network transfer rates
+4. Verify gauges return to idle after transfer completes
 
-**T25 — Web portal integration**
-1. Verify shares panel shows all shares with correct protocols/settings
-2. Create share via UI, verify appears and is accessible
-3. Edit share via UI, verify changes take effect
-4. Delete share via UI, verify confirmation dialog shows size
-5. Create user via UI with password field, verify login works
-6. Verify protocol status indicators (SMB ✓/✗, NFS ✓/✗) are accurate
-7. Verify monitoring tab gauges render and update via SSE
+**T25 — Portal end-to-end**
+1. Full workflow: create pool → create users → create shares → connect clients → monitor
+2. Verify all panels update consistently (shares panel, users panel, monitoring tab, pool status)
+3. Verify portal remains responsive during active file transfers
+4. Verify SSE streams reconnect after brief network interruption (refresh page)
