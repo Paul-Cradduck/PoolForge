@@ -8,12 +8,12 @@ func SelectRAIDLevel(parity ParityMode, eligibleDisks int) (int, error) {
 		return 0, fmt.Errorf("need at least 2 disks, got %d", eligibleDisks)
 	}
 	switch parity {
-	case SHR1:
+	case Parity1:
 		if eligibleDisks >= 3 {
 			return 5, nil
 		}
 		return 1, nil
-	case SHR2:
+	case Parity2:
 		if eligibleDisks >= 4 {
 			return 6, nil
 		}

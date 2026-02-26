@@ -8,25 +8,25 @@ import (
 type ParityMode int
 
 const (
-	SHR1 ParityMode = iota
-	SHR2
+	Parity1 ParityMode = iota
+	Parity2
 )
 
 func (p ParityMode) String() string {
-	if p == SHR2 {
-		return "shr2"
+	if p == Parity2 {
+		return "parity2"
 	}
-	return "shr1"
+	return "parity1"
 }
 
 func ParseParityMode(s string) (ParityMode, error) {
 	switch s {
-	case "shr1":
-		return SHR1, nil
-	case "shr2":
-		return SHR2, nil
+	case "parity1":
+		return Parity1, nil
+	case "parity2":
+		return Parity2, nil
 	default:
-		return 0, fmt.Errorf("unsupported parity mode %q, use shr1 or shr2", s)
+		return 0, fmt.Errorf("unsupported parity mode %q, use parity1 or parity2", s)
 	}
 }
 

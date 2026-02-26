@@ -60,7 +60,7 @@ func main() {
 		},
 	}
 	createCmd.Flags().StringVar(&createDisks, "disks", "", "Comma-separated disk devices")
-	createCmd.Flags().StringVar(&createParity, "parity", "shr1", "Parity mode: shr1 or shr2")
+	createCmd.Flags().StringVar(&createParity, "parity", "parity1", "Parity mode: parity1 or parity2")
 	createCmd.Flags().StringVar(&createName, "name", "", "Pool name")
 	createCmd.MarkFlagRequired("disks")
 	createCmd.MarkFlagRequired("name")

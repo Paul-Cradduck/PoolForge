@@ -119,7 +119,7 @@ td { padding: 8px 12px; border-bottom: 1px solid var(--border); }
     <label>Pool Name</label>
     <input id="poolName" placeholder="mypool">
     <label>Parity Mode</label>
-    <select id="parityMode"><option value="shr1">SHR-1 (single parity)</option><option value="shr2">SHR-2 (dual parity)</option></select>
+    <select id="parityMode"><option value="parity1">Single Parity (1-disk fault tolerance)</option><option value="parity2">Dual Parity (2-disk fault tolerance)</option></select>
     <label>Select Disks (min 2)</label>
     <div style="margin-bottom:6px"><button onclick="autoSelectDisks()" style="font-size:11px;padding:4px 10px">⚡ Auto-select all (optimal)</button></div>
     <div class="disk-select" id="diskSelect"></div>

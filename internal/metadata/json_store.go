@@ -206,9 +206,9 @@ func toRecord(p *engine.Pool) *poolRecord {
 }
 
 func fromRecord(rec *poolRecord) *engine.Pool {
-	pm := engine.SHR1
-	if rec.ParityMode == "shr2" {
-		pm = engine.SHR2
+	pm := engine.Parity1
+	if rec.ParityMode == "parity2" {
+		pm = engine.Parity2
 	}
 	p := &engine.Pool{
 		ID: rec.ID, Name: rec.Name, ParityMode: pm,
