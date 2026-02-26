@@ -25,6 +25,7 @@ type Daemon struct {
 	cfg     DaemonConfig
 	alerter *Alerter
 	scrub   *ScrubScheduler
+	logs    *LogBuffer
 	stop    chan struct{}
 }
 
@@ -38,13 +39,16 @@ func NewDaemon(cfg DaemonConfig) *Daemon {
 	return &Daemon{
 		cfg:     cfg,
 		alerter: NewAlerter(cfg.AlertConfig),
+		logs:    NewPersistentLogBuffer(500, "/var/lib/poolforge/logs.json"),
 		stop:    make(chan struct{}),
 	}
 }
 
-func (d *Daemon) Alerter() *Alerter { return d.alerter }
+func (d *Daemon) Alerter() *Alerter   { return d.alerter }
+func (d *Daemon) Logs() *LogBuffer    { return d.logs }
 
 func (d *Daemon) Run(ctx context.Context) {
+	d.logs.Info("safety daemon started")
 	log.Println("[safety] daemon started")
 
 	// Graceful shutdown handler
@@ -75,6 +79,7 @@ func (d *Daemon) Run(ctx context.Context) {
 			d.shutdown()
 			return
 		case sig := <-sigCh:
+			d.logs.Info("received %s, shutting down gracefully", sig)
 			log.Printf("[safety] received %s, shutting down gracefully", sig)
 			d.shutdown()
 			return
@@ -103,18 +108,23 @@ func (d *Daemon) checkSMART() {
 			}
 			status, err := CheckSMART(disk.Device)
 			if err != nil {
+				d.logs.Warn("SMART check failed for %s: %v", disk.Device, err)
 				continue
 			}
 			if !status.Healthy {
+				d.logs.Error("SMART FAILED on %s: %v", disk.Device, status.Errors)
 				d.alerter.Send(Alert{
 					Level: AlertCritical, Pool: pool.Name, Device: disk.Device,
 					Message: fmt.Sprintf("SMART health FAILED: %v", status.Errors),
 				})
 			} else if len(status.Errors) > 0 {
+				d.logs.Warn("SMART warning on %s: %v", disk.Device, status.Errors)
 				d.alerter.Send(Alert{
 					Level: AlertWarning, Pool: pool.Name, Device: disk.Device,
 					Message: fmt.Sprintf("SMART warning: %v", status.Errors),
 				})
+			} else {
+				d.logs.Info("SMART OK: %s (temp=%d°C, hours=%d)", disk.Device, status.Temperature, status.PowerOnHrs)
 			}
 		}
 	}
@@ -128,7 +138,9 @@ func (d *Daemon) backupMetadata() {
 			continue
 		}
 		if pool.MountPoint != "" {
-			BackupMetadataToMount(d.cfg.MetadataPath, pool.MountPoint)
+			if err := BackupMetadataToMount(d.cfg.MetadataPath, pool.MountPoint); err == nil {
+				d.logs.Info("metadata backed up to %s", pool.MountPoint)
+			}
 		}
 	}
 	d.updateBootConfig()
@@ -138,7 +150,9 @@ func (d *Daemon) updateBootConfig() {
 	arrays := d.getArrayDevices()
 	if len(arrays) > 0 {
 		if err := GenerateMdadmConf(arrays); err != nil {
-			log.Printf("[safety] mdadm.conf update failed: %v", err)
+			d.logs.Warn("mdadm.conf update failed: %v", err)
+		} else {
+			d.logs.Info("mdadm.conf updated with %d arrays", len(arrays))
 		}
 	}
 }

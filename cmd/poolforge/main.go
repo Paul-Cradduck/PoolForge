@@ -249,6 +249,7 @@ func main() {
 
 			srv := api.NewWithAuth(eng, serveUser, servePass)
 			srv.SetAlerter(daemon.Alerter())
+			srv.SetLogs(daemon.Logs())
 			fmt.Printf("PoolForge web portal: http://%s\n", serveAddr)
 			fmt.Println("Safety daemon: SMART monitoring, scrub scheduling, metadata backup")
 			return http.ListenAndServe(serveAddr, srv)

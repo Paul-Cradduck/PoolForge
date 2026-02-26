@@ -23,9 +23,11 @@ type Server struct {
 	user    string
 	pass    string
 	alerter *safety.Alerter
+	logs    *safety.LogBuffer
 }
 
 func (s *Server) SetAlerter(a *safety.Alerter) { s.alerter = a }
+func (s *Server) SetLogs(l *safety.LogBuffer)   { s.logs = l }
 
 func New(eng engine.EngineService) *Server {
 	return NewWithAuth(eng, "", "")
@@ -54,7 +56,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/pools/", s.handlePool)
 	s.mux.HandleFunc("/api/disks", s.handleDisks)
 	s.mux.HandleFunc("/api/preview-add", s.handlePreviewAdd)
+	s.mux.HandleFunc("/api/preview-create", s.handlePreviewCreate)
+	s.mux.HandleFunc("/api/preview-remove", s.handlePreviewRemove)
 	s.mux.HandleFunc("/api/alerts", s.handleAlerts)
+	s.mux.HandleFunc("/api/logs", s.handleLogs)
 
 	sub, _ := fs.Sub(staticFS, "static")
 	s.mux.Handle("/", http.FileServer(http.FS(sub)))
@@ -91,9 +96,11 @@ func (s *Server) handlePools(w http.ResponseWriter, r *http.Request) {
 			Name: req.Name, Disks: req.Disks, ParityMode: pm,
 		})
 		if err != nil {
+			s.logError("create pool %q: %v", req.Name, err)
 			httpError(w, err, http.StatusInternalServerError)
 			return
 		}
+		s.logInfo("pool %q created with %d disks", req.Name, len(req.Disks))
 		jsonResp(w, pool)
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -137,9 +144,11 @@ func (s *Server) handlePoolCRUD(w http.ResponseWriter, r *http.Request, poolID s
 		jsonResp(w, status)
 	case http.MethodDelete:
 		if err := s.engine.DeletePool(r.Context(), poolID); err != nil {
+			s.logError("delete pool %s: %v", poolID, err)
 			httpError(w, err, http.StatusInternalServerError)
 			return
 		}
+		s.logInfo("pool %s deleted", poolID)
 		jsonResp(w, map[string]string{"status": "deleted"})
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -157,9 +166,11 @@ func (s *Server) handlePoolDisks(w http.ResponseWriter, r *http.Request, poolID 
 			return
 		}
 		if err := s.engine.AddDisk(r.Context(), poolID, req.Disk); err != nil {
+			s.logError("add disk %s: %v", req.Disk, err)
 			httpError(w, err, http.StatusInternalServerError)
 			return
 		}
+		s.logInfo("disk %s added to pool", req.Disk)
 		jsonResp(w, map[string]string{"status": "added"})
 	case http.MethodDelete:
 		device := ""
@@ -171,9 +182,11 @@ func (s *Server) handlePoolDisks(w http.ResponseWriter, r *http.Request, poolID 
 			return
 		}
 		if err := s.engine.RemoveDisk(r.Context(), poolID, device); err != nil {
+			s.logError("remove disk %s: %v", device, err)
 			httpError(w, err, http.StatusInternalServerError)
 			return
 		}
+		s.logInfo("disk %s removed from pool", device)
 		jsonResp(w, map[string]string{"status": "removed"})
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -193,9 +206,11 @@ func (s *Server) handleFailDisk(w http.ResponseWriter, r *http.Request, poolID s
 		return
 	}
 	if err := s.engine.HandleDiskFailure(r.Context(), poolID, req.Disk); err != nil {
+		s.logError("fail disk %s: %v", req.Disk, err)
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
+	s.logInfo("disk %s marked as failed", req.Disk)
 	jsonResp(w, map[string]string{"status": "failed"})
 }
 
@@ -213,9 +228,11 @@ func (s *Server) handleReplaceDisk(w http.ResponseWriter, r *http.Request, poolI
 		return
 	}
 	if err := s.engine.ReplaceDisk(r.Context(), poolID, req.OldDisk, req.NewDisk); err != nil {
+		s.logError("replace disk %s → %s: %v", req.OldDisk, req.NewDisk, err)
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
+	s.logInfo("disk %s replaced with %s — rebuilding", req.OldDisk, req.NewDisk)
 	jsonResp(w, map[string]string{"status": "replaced"})
 }
 
@@ -330,6 +347,216 @@ func (s *Server) handleDisks(w http.ResponseWriter, r *http.Request) {
 	jsonResp(w, devs)
 }
 
+func (s *Server) handlePreviewCreate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		Disks      []string `json:"disks"`
+		ParityMode string   `json:"parityMode"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpError(w, err, http.StatusBadRequest)
+		return
+	}
+	pm, _ := engine.ParseParityMode(req.ParityMode)
+
+	// Get sizes for selected disks
+	type diskSize struct {
+		Device string
+		Size   uint64
+	}
+	var selected []diskSize
+	for _, dev := range req.Disks {
+		sz := readSysBlockSize(strings.TrimPrefix(dev, "/dev/"))
+		if sz > 2*1024*1024 {
+			sz -= 2 * 1024 * 1024
+		}
+		selected = append(selected, diskSize{dev, sz})
+	}
+
+	// Compute tiers and capacity
+	caps := make([]uint64, len(selected))
+	for i, d := range selected {
+		caps[i] = d.Size
+	}
+	tiers := engine.ComputeCapacityTiers(caps)
+	var usable uint64
+	for _, t := range tiers {
+		level, err := engine.SelectRAIDLevel(pm, t.EligibleDiskCount)
+		if err != nil {
+			continue
+		}
+		var dataDiskCount int
+		switch level {
+		case 1:
+			dataDiskCount = 1
+		case 5:
+			dataDiskCount = t.EligibleDiskCount - 1
+		case 6:
+			dataDiskCount = t.EligibleDiskCount - 2
+		}
+		usable += t.SliceSizeBytes * uint64(dataDiskCount)
+	}
+
+	// Find minimum selected disk size (the Tier 0 slice boundary)
+	var minSelected uint64
+	for _, d := range selected {
+		if minSelected == 0 || d.Size < minSelected {
+			minSelected = d.Size
+		}
+	}
+
+	// Check for excluded disks that are smaller than the smallest selected
+	var warnings []string
+	allDisks, _ := s.engine.ListPools(r.Context()) // just to get disk list
+	_ = allDisks
+	entries, _ := fs.ReadDir(sysFS, ".")
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasPrefix(name, "nvme") && !strings.HasPrefix(name, "sd") || strings.Contains(name, "p") || name == "nvme0n1" {
+			continue
+		}
+		dev := "/dev/" + name
+		isSelected := false
+		for _, s := range req.Disks {
+			if s == dev {
+				isSelected = true
+			}
+		}
+		if isSelected {
+			continue
+		}
+		sz := readSysBlockSize(name)
+		if sz > 2*1024*1024 {
+			sz -= 2 * 1024 * 1024
+		}
+		if sz > 0 && sz < minSelected {
+			warnings = append(warnings, fmt.Sprintf("%s (%s) is smaller than the smallest selected disk — it can NEVER be added to this pool later", dev, formatBytesShort(sz)))
+		}
+	}
+
+	type preview struct {
+		UsableCapacity uint64   `json:"usableCapacity"`
+		Tiers          int      `json:"tiers"`
+		MinDiskSize    uint64   `json:"minDiskSize"`
+		Warnings       []string `json:"warnings"`
+	}
+	jsonResp(w, preview{
+		UsableCapacity: usable,
+		Tiers:          len(tiers),
+		MinDiskSize:    minSelected,
+		Warnings:       warnings,
+	})
+}
+
+func formatBytesShort(b uint64) string {
+	if b >= 1e9 {
+		return fmt.Sprintf("%.1fGB", float64(b)/1e9)
+	}
+	return fmt.Sprintf("%.0fMB", float64(b)/1e6)
+}
+
+func (s *Server) handlePreviewRemove(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		PoolID string `json:"poolID"`
+		Disk   string `json:"disk"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpError(w, err, http.StatusBadRequest)
+		return
+	}
+	status, err := s.engine.GetPoolStatus(r.Context(), req.PoolID)
+	if err != nil {
+		httpError(w, err, http.StatusInternalServerError)
+		return
+	}
+
+	// Current capacity
+	var currentCap uint64
+	for _, a := range status.ArrayStatuses {
+		currentCap += a.CapacityBytes
+	}
+
+	// Compute projected capacity without this disk
+	var remainingCaps []uint64
+	for _, d := range status.Pool.Disks {
+		if d.Device != req.Disk && d.State != engine.DiskFailed {
+			remainingCaps = append(remainingCaps, d.CapacityBytes)
+		}
+	}
+
+	safe := len(remainingCaps) >= 2
+	var projectedCap uint64
+	var warnings []string
+
+	if safe {
+		tiers := engine.ComputeCapacityTiers(remainingCaps)
+		for _, t := range tiers {
+			level, err := engine.SelectRAIDLevel(status.Pool.ParityMode, t.EligibleDiskCount)
+			if err != nil {
+				continue
+			}
+			var data int
+			switch level {
+			case 1:
+				data = 1
+			case 5:
+				data = t.EligibleDiskCount - 1
+			case 6:
+				data = t.EligibleDiskCount - 2
+			}
+			projectedCap += t.SliceSizeBytes * uint64(data)
+		}
+		if projectedCap < status.UsedCapacityBytes {
+			safe = false
+			warnings = append(warnings, "not enough space — used data exceeds projected capacity")
+		}
+	} else {
+		warnings = append(warnings, "pool requires at least 2 disks")
+	}
+
+	// Check if any array would drop below minimum members
+	for _, d := range status.Pool.Disks {
+		if d.Device != req.Disk {
+			continue
+		}
+		for _, a := range status.ArrayStatuses {
+			members := len(a.Members)
+			for _, sl := range d.Slices {
+				if sl.TierIndex == a.TierIndex {
+					members--
+				}
+			}
+			if members < 2 {
+				safe = false
+				warnings = append(warnings, fmt.Sprintf("%s would have only %d member — array destroyed", a.Device, members))
+			}
+		}
+	}
+
+	type preview struct {
+		Safe              bool     `json:"safe"`
+		CurrentCapacity   uint64   `json:"currentCapacity"`
+		ProjectedCapacity uint64   `json:"projectedCapacity"`
+		LossBytes         uint64   `json:"lossBytes"`
+		Warnings          []string `json:"warnings"`
+	}
+	loss := uint64(0)
+	if currentCap > projectedCap {
+		loss = currentCap - projectedCap
+	}
+	jsonResp(w, preview{
+		Safe: safe, CurrentCapacity: currentCap, ProjectedCapacity: projectedCap,
+		LossBytes: loss, Warnings: warnings,
+	})
+}
+
 func (s *Server) handleAlerts(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -344,6 +571,25 @@ func (s *Server) handleAlerts(w http.ResponseWriter, r *http.Request) {
 		h = []safety.Alert{}
 	}
 	jsonResp(w, h)
+}
+
+func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodDelete {
+		if s.logs != nil {
+			s.logs.Clear()
+		}
+		jsonResp(w, map[string]string{"status": "cleared"})
+		return
+	}
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	if s.logs == nil {
+		jsonResp(w, []safety.LogEntry{})
+		return
+	}
+	jsonResp(w, s.logs.Entries())
 }
 
 func (s *Server) handlePreviewAdd(w http.ResponseWriter, r *http.Request) {
@@ -432,4 +678,16 @@ func httpError(w http.ResponseWriter, err error, code int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+}
+
+func (s *Server) logError(format string, args ...interface{}) {
+	if s.logs != nil {
+		s.logs.Error(format, args...)
+	}
+}
+
+func (s *Server) logInfo(format string, args ...interface{}) {
+	if s.logs != nil {
+		s.logs.Info(format, args...)
+	}
 }

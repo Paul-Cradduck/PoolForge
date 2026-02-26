@@ -107,6 +107,7 @@ td { padding: 8px 12px; border-bottom: 1px solid var(--border); }
   </div>
   <div id="pools"></div>
   <div id="alerts"></div>
+  <div id="logs"></div>
 </div>
 
 <!-- Create Pool Modal -->
@@ -118,7 +119,9 @@ td { padding: 8px 12px; border-bottom: 1px solid var(--border); }
     <label>Parity Mode</label>
     <select id="parityMode"><option value="shr1">SHR-1 (single parity)</option><option value="shr2">SHR-2 (dual parity)</option></select>
     <label>Select Disks (min 2)</label>
+    <div style="margin-bottom:6px"><button onclick="autoSelectDisks()" style="font-size:11px;padding:4px 10px">⚡ Auto-select all (optimal)</button></div>
     <div class="disk-select" id="diskSelect"></div>
+    <div id="createPreview" style="margin-top:12px"></div>
     <div class="actions">
       <button onclick="closeModal('createModal')">Cancel</button>
       <button class="primary" onclick="createPool()">Create</button>
@@ -253,6 +256,7 @@ function renderPool(summary, status) {
     <h2>${pool.Name} ${badge(pool.State)}
       <span style="flex:1"></span>
       <button onclick="showAddDisk('${pool.ID}')">+ Disk</button>
+      <button onclick="showRemoveDisk('${pool.ID}')">− Disk</button>
       <button onclick="showFailDisk('${pool.ID}')">⚠ Fail</button>
       <button onclick="showReplaceDisk('${pool.ID}')">↺ Replace</button>
       ${rebuilding ? `<button onclick="watchRebuild('${pool.ID}')">📊 Rebuild</button>` : ''}
@@ -298,7 +302,7 @@ function renderPool(summary, status) {
           <div><span style="color:var(--muted)">Used:</span> ${fmtBytes(used)}${usable > 0 ? ` (${(used/usable*100).toFixed(1)}%)` : ''}</div>
           <div><span style="color:var(--muted)">Protection:</span> ${fmtBytes(raidParity)} <span style="color:var(--accent)">(${parityPct}%)</span></div>
           ${overhead > 0 ? `<div><span style="color:var(--muted)">Overhead:</span> ${fmtBytes(overhead)}</div>` : ''}
-          ${unallocated > 0 ? `<div><span style="color:var(--muted)">Expansion Potential:</span> <span style="color:var(--yellow)">${fmtBytes(unallocated)}</span></div>` : ''}
+          ${unallocated > 0 ? `<div><span style="color:var(--muted)">Expansion Potential:</span> <span style="color:var(--text)">${fmtBytes(unallocated)}</span></div>` : ''}
         </div>
         <div style="display:flex;height:20px;border-radius:4px;overflow:hidden;font-size:10px;font-weight:600">
           ${used > 0 ? `<div style="width:${usedOfUsable * usableOfRaw / 100}%;background:var(--green);display:flex;align-items:center;justify-content:center;color:#fff" title="Used: ${fmtBytes(used)}">Used</div>` : ''}
@@ -325,9 +329,45 @@ async function showCreateModal() {
   el.innerHTML = availableDisks.map(d => {
     const cls = d.inUse ? 'disk-chip in-use' : 'disk-chip';
     const label = d.inUse ? `${d.device} (${d.sizeGB.toFixed(1)}G) [${d.pool}]` : `${d.device} (${d.sizeGB.toFixed(1)}G)`;
-    return `<div class="${cls}" data-dev="${d.device}" ${d.inUse ? '' : `onclick="this.classList.toggle('selected')"`}>${label}</div>`;
+    return `<div class="${cls}" data-dev="${d.device}" ${d.inUse ? '' : `onclick="this.classList.toggle('selected'); updateCreatePreview()"`}>${label}</div>`;
   }).join('') || '<span style="color:var(--muted)">No available disks found</span>';
+  document.getElementById('createPreview').innerHTML = '';
   document.getElementById('createModal').classList.add('active');
+}
+
+function autoSelectDisks() {
+  document.querySelectorAll('#diskSelect .disk-chip:not(.in-use)').forEach(c => c.classList.add('selected'));
+  updateCreatePreview();
+}
+
+async function updateCreatePreview() {
+  const chips = document.querySelectorAll('#diskSelect .disk-chip.selected');
+  const disks = Array.from(chips).map(c => c.dataset.dev);
+  const el = document.getElementById('createPreview');
+  if (disks.length < 2) { el.innerHTML = ''; return; }
+  try {
+    const p = await api('/preview-create', { method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({disks, parityMode: document.getElementById('parityMode').value}) });
+    let html = `<div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:13px">
+      <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+        <span style="color:var(--muted)">Projected capacity</span><span style="color:var(--green)">${fmtBytes(p.usableCapacity)}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+        <span style="color:var(--muted)">Tiers</span><span>${p.tiers}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+        <span style="color:var(--muted)">Min disk for future expansion</span><span>${fmtBytes(p.minDiskSize)}</span>
+      </div>`;
+    if (p.warnings && p.warnings.length > 0) {
+      html += '<div style="margin-top:8px">';
+      for (const w of p.warnings) {
+        html += `<div style="color:var(--yellow);font-size:12px;padding:4px 0">⚠ ${w}</div>`;
+      }
+      html += '</div>';
+    }
+    html += '</div>';
+    el.innerHTML = html;
+  } catch(e) { el.innerHTML = ''; }
 }
 
 async function createPool() {
@@ -415,6 +455,56 @@ async function showAddDisk(poolID) {
                 <span style="color:var(--muted)">Tiers</span><span>${p.currentTiers} → ${p.projectedTiers}</span>
               </div>
             </div>`;
+        } catch(e) { el.innerHTML = `<span style="color:var(--red);font-size:12px">${e.message}</span>`; }
+      };
+    });
+  }, 0);
+}
+
+async function showRemoveDisk(poolID) {
+  const status = poolStatusCache[poolID];
+  const poolDisks = (status?.DiskStatuses || []).filter(d => d.State === 'healthy').map(d => ({device: d.Device, sizeGB: (d.CapacityBytes||0)/1e9}));
+  showAction('Remove Disk',
+    (poolDisks.length ? chipSelector('removeDiskSel', poolDisks.map(d => ({device:d.device, sizeGB:d.sizeGB})), 'Select a disk to remove') : '<p style="color:var(--muted)">No disks</p>') +
+    '<div id="removePreview" style="margin-top:12px"></div>',
+    async () => {
+      const dev = getChipValue('removeDiskSel');
+      if (!dev) return toast('Select a disk', true);
+      const devName = dev.replace('/dev/','');
+      await api('/pools/' + poolID + '/disks/' + devName, { method: 'DELETE' });
+      toast('Disk removed'); closeModal('actionModal'); refresh();
+    });
+  // Attach preview on chip click
+  setTimeout(() => {
+    document.querySelectorAll('#removeDiskSel .disk-chip').forEach(chip => {
+      chip.onclick = async function() {
+        chipSelect('removeDiskSel', this);
+        const dev = this.dataset.dev;
+        const el = document.getElementById('removePreview');
+        el.innerHTML = '<span style="color:var(--muted);font-size:12px">Checking safety...</span>';
+        try {
+          const p = await api('/preview-remove', { method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({poolID, disk: dev}) });
+          let html = `<div style="background:var(--bg);border:1px solid ${p.safe?'var(--green)':'var(--red)'};border-radius:8px;padding:12px;font-size:13px">
+            <div style="margin-bottom:8px;font-weight:600;color:${p.safe?'var(--green)':'var(--red)'}">${p.safe ? '✓ Safe to remove' : '✕ Unsafe to remove'}</div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+              <span style="color:var(--muted)">Current capacity</span><span>${fmtBytes(p.currentCapacity)}</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+              <span style="color:var(--muted)">After removal</span><span>${fmtBytes(p.projectedCapacity)}</span>
+            </div>
+            <div style="display:flex;justify-content:space-between">
+              <span style="color:var(--muted)">Capacity loss</span><span style="color:var(--red)">−${fmtBytes(p.lossBytes)}</span>
+            </div>`;
+          if (p.warnings && p.warnings.length > 0) {
+            html += '<div style="margin-top:8px">';
+            for (const w of p.warnings) html += `<div style="color:var(--red);font-size:12px;padding:2px 0">⚠ ${w}</div>`;
+            html += '</div>';
+          }
+          html += '</div>';
+          el.innerHTML = html;
+          // Disable submit if unsafe
+          document.getElementById('actionSubmit').disabled = !p.safe;
         } catch(e) { el.innerHTML = `<span style="color:var(--red);font-size:12px">${e.message}</span>`; }
       };
     });
@@ -531,10 +621,37 @@ async function refreshAlerts() {
   } catch(e) {}
 }
 
+// --- Logs ---
+async function refreshLogs() {
+  try {
+    const logs = await api('/logs');
+    const el = document.getElementById('logs');
+    if (!logs || logs.length === 0) {
+      el.innerHTML = '';
+      return;
+    }
+    const levelColor = {info:'var(--green)', warn:'var(--yellow)', error:'var(--red)'};
+    el.innerHTML = '<div class="card"><h2>📋 Logs <button onclick="clearLogs()" style="font-size:11px;padding:2px 8px;margin-left:8px">Clear</button></h2><div style="max-height:300px;overflow-y:auto">' +
+      logs.slice().reverse().slice(0, 50).map(l => {
+        const t = new Date(l.timestamp).toLocaleTimeString();
+        return `<div style="font-size:11px;padding:3px 0;border-bottom:1px solid var(--border);font-family:monospace">
+          <span style="color:var(--muted)">${t}</span>
+          <span style="color:${levelColor[l.level]||'var(--text)'};font-weight:600">${l.level.toUpperCase().padEnd(5)}</span>
+          <span>${l.message}</span></div>`;
+      }).join('') + '</div></div>';
+  } catch(e) {}
+}
+
+async function clearLogs() {
+  try { await api('/logs', {method:'DELETE'}); refreshLogs(); } catch(e) {}
+}
+
 // Initial load
 refresh();
 refreshAlerts();
+refreshLogs();
 setInterval(refreshAlerts, 15000);
+setInterval(refreshLogs, 10000);
 // Auto-refresh every 10s (5s when rebuilding)
 let refreshInterval = setInterval(refresh, 10000);
 

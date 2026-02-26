@@ -13,6 +13,13 @@ func execCommand(name string, args ...string) {
 	exec.Command(name, args...).Run()
 }
 
+func fmtBytesShort(b uint64) string {
+	if b >= 1e9 {
+		return fmt.Sprintf("%.1fGB", float64(b)/1e9)
+	}
+	return fmt.Sprintf("%.0fMB", float64(b)/1e6)
+}
+
 // HandleDiskFailure marks a disk as failed and updates all affected arrays to degraded.
 func (e *engineImpl) HandleDiskFailure(ctx context.Context, poolID string, disk string) error {
 	pool, err := e.meta.LoadPool(poolID)
@@ -185,17 +192,27 @@ func (e *engineImpl) DeletePool(ctx context.Context, poolID string) error {
 	e.lvm.RemoveLogicalVolume(lvPath)
 	e.lvm.RemoveVolumeGroup(pool.VolumeGroup)
 
-	// Stop arrays and remove PVs
+	// Remove PVs and stop arrays
 	for _, a := range pool.RAIDArrays {
 		e.lvm.RemovePhysicalVolume(a.Device)
 		e.raid.StopArray(a.Device)
 	}
 
-	// Wipe all member disks
+	// Zero superblocks on every partition BEFORE wiping partition tables
+	// This prevents mdadm from auto-reassembling
 	for _, d := range pool.Disks {
 		for _, sl := range d.Slices {
-			e.raid.RemoveMember("", sl.PartitionDevice) // best-effort cleanup
+			execCommand("mdadm", "--zero-superblock", sl.PartitionDevice)
 		}
+	}
+
+	// Stop any arrays that auto-reassembled during cleanup
+	for _, a := range pool.RAIDArrays {
+		e.raid.StopArray(a.Device)
+	}
+
+	// Now wipe partition tables
+	for _, d := range pool.Disks {
 		e.disk.WipePartitionTable(d.Device)
 	}
 
@@ -232,6 +249,18 @@ func (e *engineImpl) AddDisk(ctx context.Context, poolID string, disk string) er
 	newInfo, err := e.disk.GetDiskInfo(disk)
 	if err != nil {
 		return fmt.Errorf("cannot read disk %s: %w", disk, err)
+	}
+
+	// Reject if disk is smaller than the smallest pool disk
+	var minPoolDisk uint64
+	for _, d := range pool.Disks {
+		if d.State != DiskFailed && (minPoolDisk == 0 || d.CapacityBytes < minPoolDisk) {
+			minPoolDisk = d.CapacityBytes
+		}
+	}
+	if newInfo.CapacityBytes < minPoolDisk {
+		return fmt.Errorf("disk %s (%s) is smaller than the smallest pool disk (%s) — it cannot participate in any existing tier. Minimum size: %s",
+			disk, fmtBytesShort(newInfo.CapacityBytes), fmtBytesShort(minPoolDisk), fmtBytesShort(minPoolDisk))
 	}
 
 	// Recompute tiers with all disks including the new one
