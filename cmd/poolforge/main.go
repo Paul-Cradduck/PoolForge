@@ -10,6 +10,7 @@ import (
 	"github.com/poolforge/poolforge/internal/api"
 	"github.com/poolforge/poolforge/internal/engine"
 	"github.com/poolforge/poolforge/internal/metadata"
+	"github.com/poolforge/poolforge/internal/safety"
 	"github.com/poolforge/poolforge/internal/storage"
 	"github.com/spf13/cobra"
 )
@@ -227,20 +228,36 @@ func main() {
 	failDiskCmd.MarkFlagRequired("disk")
 	pool.AddCommand(failDiskCmd)
 
-	// serve — web portal
-	var serveAddr, serveUser, servePass string
+	// serve — web portal + safety daemon
+	var serveAddr, serveUser, servePass, webhookURL string
 	serveCmd := &cobra.Command{
 		Use:   "serve",
-		Short: "Start the web management portal",
+		Short: "Start the web management portal with safety daemon",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Start safety daemon
+			daemon := safety.NewDaemon(safety.DaemonConfig{
+				Engine:        eng,
+				MetadataStore: meta,
+				MetadataPath:  "/var/lib/poolforge/metadata.json",
+				AlertConfig:   safety.AlertConfig{WebhookURL: webhookURL},
+				SMARTInterval: 5 * 60 * 1000000000,  // 5 min
+				ScrubInterval: 7 * 24 * 3600000000000, // 7 days
+			})
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			go daemon.Run(ctx)
+
 			srv := api.NewWithAuth(eng, serveUser, servePass)
+			srv.SetAlerter(daemon.Alerter())
 			fmt.Printf("PoolForge web portal: http://%s\n", serveAddr)
+			fmt.Println("Safety daemon: SMART monitoring, scrub scheduling, metadata backup")
 			return http.ListenAndServe(serveAddr, srv)
 		},
 	}
 	serveCmd.Flags().StringVar(&serveAddr, "addr", "0.0.0.0:8080", "Listen address")
 	serveCmd.Flags().StringVar(&serveUser, "user", "", "Basic auth username")
 	serveCmd.Flags().StringVar(&servePass, "pass", "", "Basic auth password")
+	serveCmd.Flags().StringVar(&webhookURL, "webhook", "", "Alert webhook URL")
 	root.AddCommand(serveCmd)
 
 	if err := root.Execute(); err != nil {

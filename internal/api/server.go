@@ -11,17 +11,21 @@ import (
 	"time"
 
 	"github.com/poolforge/poolforge/internal/engine"
+	"github.com/poolforge/poolforge/internal/safety"
 )
 
 //go:embed all:static
 var staticFS embed.FS
 
 type Server struct {
-	engine engine.EngineService
-	mux    *http.ServeMux
-	user   string
-	pass   string
+	engine  engine.EngineService
+	mux     *http.ServeMux
+	user    string
+	pass    string
+	alerter *safety.Alerter
 }
+
+func (s *Server) SetAlerter(a *safety.Alerter) { s.alerter = a }
 
 func New(eng engine.EngineService) *Server {
 	return NewWithAuth(eng, "", "")
@@ -50,6 +54,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/pools/", s.handlePool)
 	s.mux.HandleFunc("/api/disks", s.handleDisks)
 	s.mux.HandleFunc("/api/preview-add", s.handlePreviewAdd)
+	s.mux.HandleFunc("/api/alerts", s.handleAlerts)
 
 	sub, _ := fs.Sub(staticFS, "static")
 	s.mux.Handle("/", http.FileServer(http.FS(sub)))
@@ -323,6 +328,22 @@ func (s *Server) handleDisks(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	jsonResp(w, devs)
+}
+
+func (s *Server) handleAlerts(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	if s.alerter == nil {
+		jsonResp(w, []safety.Alert{})
+		return
+	}
+	h := s.alerter.History()
+	if h == nil {
+		h = []safety.Alert{}
+	}
+	jsonResp(w, h)
 }
 
 func (s *Server) handlePreviewAdd(w http.ResponseWriter, r *http.Request) {

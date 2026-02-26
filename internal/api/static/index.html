@@ -106,6 +106,7 @@ td { padding: 8px 12px; border-bottom: 1px solid var(--border); }
     <button onclick="refresh()">↻ Refresh</button>
   </div>
   <div id="pools"></div>
+  <div id="alerts"></div>
 </div>
 
 <!-- Create Pool Modal -->
@@ -508,8 +509,32 @@ document.querySelectorAll('.modal-overlay').forEach(el => {
   el.addEventListener('click', e => { if (e.target === el) el.classList.remove('active'); });
 });
 
+// --- Alerts ---
+async function refreshAlerts() {
+  try {
+    const alerts = await api('/alerts');
+    const el = document.getElementById('alerts');
+    if (!alerts || alerts.length === 0) {
+      el.innerHTML = '';
+      return;
+    }
+    el.innerHTML = '<div class="card"><h2>⚡ Alerts</h2>' +
+      alerts.slice().reverse().slice(0, 20).map(a => {
+        const cls = a.level === 'critical' ? 'color:var(--red)' : a.level === 'warning' ? 'color:var(--yellow)' : 'color:var(--muted)';
+        const t = new Date(a.timestamp).toLocaleTimeString();
+        return `<div style="font-size:12px;padding:4px 0;border-bottom:1px solid var(--border)">
+          <span style="${cls};font-weight:600">${a.level.toUpperCase()}</span>
+          <span style="color:var(--muted)">${t}</span>
+          ${a.device ? `<span>${a.device}</span>` : ''}
+          <span>${a.message}</span></div>`;
+      }).join('') + '</div>';
+  } catch(e) {}
+}
+
 // Initial load
 refresh();
+refreshAlerts();
+setInterval(refreshAlerts, 15000);
 // Auto-refresh every 10s (5s when rebuilding)
 let refreshInterval = setInterval(refresh, 10000);
 
