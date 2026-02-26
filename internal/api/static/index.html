@@ -105,11 +105,57 @@ td { padding: 8px 12px; border-bottom: 1px solid var(--border); }
     <button class="primary" onclick="showCreateModal()">+ Create Pool</button>
     <button onclick="importPool()">📥 Import</button>
     <button onclick="refresh()">↻ Refresh</button>
+    <span style="flex:1"></span>
+    <button id="tabPoolsBtn" class="primary" onclick="switchTab('pools')">Pools</button>
+    <button id="tabMonitorBtn" onclick="switchTab('monitor')">📊 Monitoring</button>
   </div>
-  <div id="pools"></div>
-  <div id="safety"></div>
-  <div id="alerts"></div>
-  <div id="logs"></div>
+  <div id="tabPools">
+    <div id="pools"></div>
+    <div id="shares"></div>
+    <div id="users"></div>
+    <div id="safety"></div>
+    <div id="alerts"></div>
+    <div id="logs"></div>
+  </div>
+  <div id="tabMonitor" style="display:none">
+    <div class="card">
+      <h2>📊 Real-Time Monitoring
+        <span style="flex:1"></span>
+        <span id="protocolStatus" style="font-size:12px"></span>
+      </h2>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px;margin-bottom:16px">
+        <div class="gauge-card" style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px">
+          <div style="font-size:12px;color:var(--muted);margin-bottom:6px">Disk Read</div>
+          <div id="gaugeDiskRead" style="font-size:24px;font-weight:700;color:var(--green)">0 MB/s</div>
+        </div>
+        <div class="gauge-card" style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px">
+          <div style="font-size:12px;color:var(--muted);margin-bottom:6px">Disk Write</div>
+          <div id="gaugeDiskWrite" style="font-size:24px;font-weight:700;color:var(--accent)">0 MB/s</div>
+        </div>
+        <div class="gauge-card" style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px">
+          <div style="font-size:12px;color:var(--muted);margin-bottom:6px">Network In</div>
+          <div id="gaugeNetRx" style="font-size:24px;font-weight:700;color:var(--green)">0 MB/s</div>
+        </div>
+        <div class="gauge-card" style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px">
+          <div style="font-size:12px;color:var(--muted);margin-bottom:6px">Network Out</div>
+          <div id="gaugeNetTx" style="font-size:24px;font-weight:700;color:var(--accent)">0 MB/s</div>
+        </div>
+        <div class="gauge-card" style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px">
+          <div style="font-size:12px;color:var(--muted);margin-bottom:6px">SMB Throughput</div>
+          <div id="gaugeSMB" style="font-size:24px;font-weight:700;color:var(--yellow)">0 conn</div>
+        </div>
+        <div class="gauge-card" style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px">
+          <div style="font-size:12px;color:var(--muted);margin-bottom:6px">NFS Throughput</div>
+          <div id="gaugeNFS" style="font-size:24px;font-weight:700;color:var(--yellow)">0 conn</div>
+        </div>
+      </div>
+      <h3 style="font-size:13px;margin-bottom:8px">Connected Clients</h3>
+      <table id="clientsTable">
+        <tr><th>User</th><th>IP</th><th>Share</th><th>Protocol</th><th>Duration</th></tr>
+      </table>
+      <div id="noClients" style="text-align:center;padding:16px;color:var(--muted);font-size:13px">No active connections</div>
+    </div>
+  </div>
 </div>
 
 <!-- Create Pool Modal -->
@@ -139,6 +185,53 @@ td { padding: 8px 12px; border-bottom: 1px solid var(--border); }
     <div class="actions">
       <button onclick="closeModal('actionModal')">Cancel</button>
       <button class="primary" id="actionSubmit">Submit</button>
+    </div>
+  </div>
+</div>
+
+<!-- Share Create Modal -->
+<div class="modal-overlay" id="shareModal">
+  <div class="modal">
+    <h3 id="shareModalTitle">Create Share</h3>
+    <label>Share Name</label>
+    <input id="shareNameInput" placeholder="documents">
+    <label>Protocols</label>
+    <div style="display:flex;gap:12px;margin-top:4px">
+      <label style="display:flex;align-items:center;gap:4px;font-size:13px;color:var(--text)"><input type="checkbox" id="shareSMB" checked> SMB</label>
+      <label style="display:flex;align-items:center;gap:4px;font-size:13px;color:var(--text)"><input type="checkbox" id="shareNFS"> NFS</label>
+    </div>
+    <label>NFS Client Restriction</label>
+    <input id="shareNFSClients" placeholder="* (all)" value="*">
+    <div style="display:flex;gap:12px;margin-top:12px">
+      <label style="display:flex;align-items:center;gap:4px;font-size:13px;color:var(--text)"><input type="checkbox" id="shareReadOnly"> Read-only</label>
+      <label style="display:flex;align-items:center;gap:4px;font-size:13px;color:var(--text)"><input type="checkbox" id="shareGuest"> Guest access</label>
+      <label style="display:flex;align-items:center;gap:4px;font-size:13px;color:var(--text)"><input type="checkbox" id="shareBrowsable" checked> Browsable</label>
+    </div>
+    <input type="hidden" id="sharePoolID">
+    <input type="hidden" id="shareEditName">
+    <div class="actions">
+      <button onclick="closeModal('shareModal')">Cancel</button>
+      <button class="primary" onclick="submitShare()">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- User Create Modal -->
+<div class="modal-overlay" id="userModal">
+  <div class="modal">
+    <h3>Add User</h3>
+    <label>Username</label>
+    <input id="userNameInput" placeholder="bob">
+    <label>Password</label>
+    <input id="userPassInput" type="password" placeholder="password">
+    <label>Pool</label>
+    <select id="userPoolSelect"></select>
+    <div style="margin-top:12px">
+      <label style="display:flex;align-items:center;gap:4px;font-size:13px;color:var(--text)"><input type="checkbox" id="userGlobal"> Global access (all pools)</label>
+    </div>
+    <div class="actions">
+      <button onclick="closeModal('userModal')">Cancel</button>
+      <button class="primary" onclick="submitUser()">Add User</button>
     </div>
   </div>
 </div>
@@ -724,6 +817,257 @@ async function autoWatchRebuilds() {
   } catch(e) {}
 }
 setInterval(autoWatchRebuilds, 3000);
+
+// --- Tab Switching ---
+function switchTab(tab) {
+  document.getElementById('tabPools').style.display = tab === 'pools' ? '' : 'none';
+  document.getElementById('tabMonitor').style.display = tab === 'monitor' ? '' : 'none';
+  document.getElementById('tabPoolsBtn').className = tab === 'pools' ? 'primary' : '';
+  document.getElementById('tabMonitorBtn').className = tab === 'monitor' ? 'primary' : '';
+  if (tab === 'monitor') startMonitoringSSE();
+  else stopMonitoringSSE();
+}
+
+// --- Shares Panel ---
+async function refreshShares() {
+  try {
+    const pools = await api('/pools');
+    const el = document.getElementById('shares');
+    if (!pools || pools.length === 0) { el.innerHTML = ''; return; }
+    let html = '';
+    for (const p of pools) {
+      const shares = await api('/pools/' + p.ID + '/shares');
+      html += `<div class="card"><h2>📁 Shares — ${p.Name}
+        <span style="flex:1"></span>
+        <button onclick="showShareModal('${p.ID}')">+ Share</button>
+      </h2>`;
+      if (!shares || shares.length === 0) {
+        html += '<div style="color:var(--muted);font-size:13px;padding:8px 0">No shares yet</div>';
+      } else {
+        html += '<table><tr><th>Name</th><th>Protocols</th><th>NFS Clients</th><th>Read-Only</th><th>Guest</th><th>Browsable</th><th></th></tr>';
+        for (const s of shares) {
+          html += `<tr>
+            <td>${s.name}</td>
+            <td>${(s.protocols||[]).join(', ')}</td>
+            <td>${s.nfs_clients || '*'}</td>
+            <td>${s.read_only ? '✓' : ''}</td>
+            <td>${s.smb_public ? '✓' : ''}</td>
+            <td>${s.smb_browsable ? '✓' : ''}</td>
+            <td>
+              <button onclick="editShare('${p.ID}','${s.name}')" style="font-size:11px;padding:2px 8px">Edit</button>
+              <button class="danger" onclick="deleteShare('${p.ID}','${s.name}')" style="font-size:11px;padding:2px 8px">Delete</button>
+            </td></tr>`;
+        }
+        html += '</table>';
+      }
+      html += '</div>';
+    }
+    el.innerHTML = html;
+  } catch(e) {}
+}
+
+function showShareModal(poolID, editName) {
+  document.getElementById('sharePoolID').value = poolID;
+  document.getElementById('shareEditName').value = editName || '';
+  document.getElementById('shareModalTitle').textContent = editName ? 'Edit Share' : 'Create Share';
+  if (!editName) {
+    document.getElementById('shareNameInput').value = '';
+    document.getElementById('shareSMB').checked = true;
+    document.getElementById('shareNFS').checked = false;
+    document.getElementById('shareNFSClients').value = '*';
+    document.getElementById('shareReadOnly').checked = false;
+    document.getElementById('shareGuest').checked = false;
+    document.getElementById('shareBrowsable').checked = true;
+  }
+  document.getElementById('shareModal').classList.add('active');
+}
+
+async function editShare(poolID, name) {
+  const shares = await api('/pools/' + poolID + '/shares');
+  const s = shares.find(x => x.name === name);
+  if (!s) return;
+  document.getElementById('shareNameInput').value = s.name;
+  document.getElementById('shareNameInput').disabled = true;
+  document.getElementById('shareSMB').checked = (s.protocols||[]).includes('smb');
+  document.getElementById('shareNFS').checked = (s.protocols||[]).includes('nfs');
+  document.getElementById('shareNFSClients').value = s.nfs_clients || '*';
+  document.getElementById('shareReadOnly').checked = s.read_only;
+  document.getElementById('shareGuest').checked = s.smb_public;
+  document.getElementById('shareBrowsable').checked = s.smb_browsable;
+  showShareModal(poolID, name);
+}
+
+async function submitShare() {
+  const poolID = document.getElementById('sharePoolID').value;
+  const editName = document.getElementById('shareEditName').value;
+  const protos = [];
+  if (document.getElementById('shareSMB').checked) protos.push('smb');
+  if (document.getElementById('shareNFS').checked) protos.push('nfs');
+  const share = {
+    name: document.getElementById('shareNameInput').value.trim(),
+    protocols: protos,
+    nfs_clients: document.getElementById('shareNFSClients').value.trim(),
+    read_only: document.getElementById('shareReadOnly').checked,
+    smb_public: document.getElementById('shareGuest').checked,
+    smb_browsable: document.getElementById('shareBrowsable').checked,
+  };
+  if (!share.name) return toast('Enter a share name', true);
+  if (protos.length === 0) return toast('Select at least one protocol', true);
+  try {
+    if (editName) {
+      await api('/pools/' + poolID + '/shares/' + editName, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(share) });
+      toast('Share updated');
+    } else {
+      await api('/pools/' + poolID + '/shares', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(share) });
+      toast('Share created');
+    }
+    document.getElementById('shareNameInput').disabled = false;
+    closeModal('shareModal');
+    refreshShares();
+  } catch(e) { toast(e.message, true); }
+}
+
+async function deleteShare(poolID, name) {
+  try {
+    const info = await api('/pools/' + poolID + '/shares/' + name, { method: 'DELETE' });
+    if (info.confirm) {
+      const size = fmtBytes(info.sizeBytes || 0);
+      if (!confirm(`Delete share "${name}"? This will permanently remove ${size} of data.`)) return;
+      await api('/pools/' + poolID + '/shares/' + name + '?force=true', { method: 'DELETE' });
+    }
+    toast('Share deleted');
+    refreshShares();
+  } catch(e) { toast(e.message, true); }
+}
+
+// --- Users Panel ---
+async function refreshUsers() {
+  try {
+    const users = await api('/users');
+    const el = document.getElementById('users');
+    let html = `<div class="card"><h2>👤 Users <span style="flex:1"></span><button onclick="showUserModal()">+ User</button></h2>`;
+    if (!users || users.length === 0) {
+      html += '<div style="color:var(--muted);font-size:13px;padding:8px 0">No users yet</div>';
+    } else {
+      html += '<table><tr><th>Name</th><th>UID</th><th>Pool</th><th>Global</th><th></th></tr>';
+      for (const u of users) {
+        html += `<tr><td>${u.name}</td><td>${u.uid}</td><td>${u.pool_id}</td><td>${u.global_access ? '✓' : ''}</td>
+          <td><button class="danger" onclick="deleteUser('${u.name}')" style="font-size:11px;padding:2px 8px">Delete</button></td></tr>`;
+      }
+      html += '</table>';
+    }
+    html += '</div>';
+    el.innerHTML = html;
+  } catch(e) {}
+}
+
+async function showUserModal() {
+  const pools = await api('/pools');
+  const sel = document.getElementById('userPoolSelect');
+  sel.innerHTML = pools.map(p => `<option value="${p.ID}">${p.Name}</option>`).join('');
+  document.getElementById('userNameInput').value = '';
+  document.getElementById('userPassInput').value = '';
+  document.getElementById('userGlobal').checked = false;
+  document.getElementById('userModal').classList.add('active');
+}
+
+async function submitUser() {
+  const name = document.getElementById('userNameInput').value.trim();
+  const password = document.getElementById('userPassInput').value;
+  const poolID = document.getElementById('userPoolSelect').value;
+  const globalAccess = document.getElementById('userGlobal').checked;
+  if (!name || !password) return toast('Name and password required', true);
+  try {
+    await api('/users', { method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({name, password, pool_id: poolID, global_access: globalAccess}) });
+    toast('User created');
+    closeModal('userModal');
+    refreshUsers();
+  } catch(e) { toast(e.message, true); }
+}
+
+async function deleteUser(name) {
+  if (!confirm(`Delete user "${name}"?`)) return;
+  try {
+    await api('/users/' + name, { method: 'DELETE' });
+    toast('User deleted');
+    refreshUsers();
+  } catch(e) { toast(e.message, true); }
+}
+
+// --- Monitoring SSE ---
+let monitorSSE = null;
+
+function startMonitoringSSE() {
+  if (monitorSSE) return;
+  monitorSSE = new EventSource(API + '/monitoring/live');
+  monitorSSE.onmessage = (e) => {
+    const snap = JSON.parse(e.data);
+    updateGauges(snap);
+  };
+  monitorSSE.onerror = () => { stopMonitoringSSE(); };
+  refreshClients();
+  refreshProtocolStatus();
+}
+
+function stopMonitoringSSE() {
+  if (monitorSSE) { monitorSSE.close(); monitorSSE = null; }
+}
+
+function updateGauges(snap) {
+  let totalRead = 0, totalWrite = 0;
+  (snap.disk_io || []).forEach(d => { totalRead += d.read_mbps; totalWrite += d.write_mbps; });
+  document.getElementById('gaugeDiskRead').textContent = totalRead.toFixed(1) + ' MB/s';
+  document.getElementById('gaugeDiskWrite').textContent = totalWrite.toFixed(1) + ' MB/s';
+
+  let totalRx = 0, totalTx = 0, smbInfo = '', nfsInfo = '';
+  (snap.net_io || []).forEach(n => {
+    if (n.protocol === 'smb') { smbInfo = n.rx_mbps.toFixed(0) + ' conn'; return; }
+    if (n.protocol === 'nfs') { nfsInfo = n.rx_mbps.toFixed(0) + ' conn'; return; }
+    totalRx += n.rx_mbps; totalTx += n.tx_mbps;
+  });
+  document.getElementById('gaugeNetRx').textContent = totalRx.toFixed(1) + ' MB/s';
+  document.getElementById('gaugeNetTx').textContent = totalTx.toFixed(1) + ' MB/s';
+  document.getElementById('gaugeSMB').textContent = smbInfo || '0 conn';
+  document.getElementById('gaugeNFS').textContent = nfsInfo || '0 conn';
+}
+
+async function refreshClients() {
+  try {
+    const clients = await api('/monitoring/clients');
+    const tbody = document.getElementById('clientsTable');
+    const noClients = document.getElementById('noClients');
+    if (!clients || clients.length === 0) {
+      tbody.innerHTML = '<tr><th>User</th><th>IP</th><th>Share</th><th>Protocol</th><th>Duration</th></tr>';
+      noClients.style.display = '';
+      return;
+    }
+    noClients.style.display = 'none';
+    let rows = '<tr><th>User</th><th>IP</th><th>Share</th><th>Protocol</th><th>Duration</th></tr>';
+    const now = Math.floor(Date.now() / 1000);
+    for (const c of clients) {
+      const dur = now - (c.connected_at || now);
+      const durStr = dur < 60 ? dur + 's' : dur < 3600 ? Math.floor(dur/60) + 'm' : Math.floor(dur/3600) + 'h ' + Math.floor((dur%3600)/60) + 'm';
+      rows += `<tr><td>${c.user || '-'}</td><td>${c.ip}</td><td>${c.share || '-'}</td><td>${c.protocol}</td><td>${durStr}</td></tr>`;
+    }
+    tbody.innerHTML = rows;
+  } catch(e) {}
+}
+
+async function refreshProtocolStatus() {
+  try {
+    const s = await api('/monitoring/status');
+    const el = document.getElementById('protocolStatus');
+    el.innerHTML = `SMB ${s.smb ? '<span style="color:var(--green)">✓</span>' : '<span style="color:var(--red)">✗</span>'} &nbsp; NFS ${s.nfs ? '<span style="color:var(--green)">✓</span>' : '<span style="color:var(--red)">✗</span>'}`;
+  } catch(e) {}
+}
+
+// Refresh shares/users on load and periodically
+refreshShares();
+refreshUsers();
+setInterval(refreshShares, 15000);
+setInterval(refreshUsers, 15000);
+setInterval(() => { if (monitorSSE) { refreshClients(); refreshProtocolStatus(); } }, 5000);
 </script>
 </body>
 </html>

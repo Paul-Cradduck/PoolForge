@@ -11,25 +11,31 @@ import (
 	"time"
 
 	"github.com/poolforge/poolforge/internal/engine"
+	"github.com/poolforge/poolforge/internal/monitoring"
 	"github.com/poolforge/poolforge/internal/safety"
+	"github.com/poolforge/poolforge/internal/sharing"
 )
 
 //go:embed all:static
 var staticFS embed.FS
 
 type Server struct {
-	engine  engine.EngineService
-	mux     *http.ServeMux
-	user    string
-	pass    string
-	alerter *safety.Alerter
-	logs    *safety.LogBuffer
-	daemon  *safety.Daemon
+	engine    engine.EngineService
+	mux       *http.ServeMux
+	user      string
+	pass      string
+	alerter   *safety.Alerter
+	logs      *safety.LogBuffer
+	daemon    *safety.Daemon
+	collector *monitoring.Collector
+	shares    *sharing.ShareManager
 }
 
-func (s *Server) SetAlerter(a *safety.Alerter) { s.alerter = a }
-func (s *Server) SetLogs(l *safety.LogBuffer)   { s.logs = l }
-func (s *Server) SetDaemon(d *safety.Daemon)     { s.daemon = d }
+func (s *Server) SetAlerter(a *safety.Alerter)        { s.alerter = a }
+func (s *Server) SetLogs(l *safety.LogBuffer)          { s.logs = l }
+func (s *Server) SetDaemon(d *safety.Daemon)           { s.daemon = d }
+func (s *Server) SetCollector(c *monitoring.Collector)  { s.collector = c }
+func (s *Server) SetShares(sm *sharing.ShareManager)    { s.shares = sm }
 
 func New(eng engine.EngineService) *Server {
 	return NewWithAuth(eng, "", "")
@@ -64,6 +70,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/safety-status", s.handleSafetyStatus)
 	s.mux.HandleFunc("/api/import", s.handleImport)
 	s.mux.HandleFunc("/api/logs", s.handleLogs)
+	s.mux.HandleFunc("/api/users", s.handleUsers)
+	s.mux.HandleFunc("/api/users/", s.handleUserDelete)
+	s.mux.HandleFunc("/api/monitoring/live", s.handleMonitoringLive)
+	s.mux.HandleFunc("/api/monitoring/history", s.handleMonitoringHistory)
+	s.mux.HandleFunc("/api/monitoring/clients", s.handleMonitoringClients)
+	s.mux.HandleFunc("/api/monitoring/status", s.handleProtocolStatus)
 
 	sub, _ := fs.Sub(staticFS, "static")
 	s.mux.Handle("/", http.FileServer(http.FS(sub)))
@@ -132,6 +144,8 @@ func (s *Server) handlePool(w http.ResponseWriter, r *http.Request) {
 		s.handleReplaceDisk(w, r, poolID)
 	case "rebuild":
 		s.handleRebuildSSE(w, r, poolID)
+	case "shares":
+		s.handleShares(w, r, poolID, parts)
 	default:
 		w.WriteHeader(http.StatusNotFound)
 	}
@@ -717,4 +731,239 @@ func (s *Server) logInfo(format string, args ...interface{}) {
 	if s.logs != nil {
 		s.logs.Info(format, args...)
 	}
+}
+
+// --- Phase 5: Shares ---
+
+func (s *Server) handleShares(w http.ResponseWriter, r *http.Request, poolID string, parts []string) {
+	shareName := ""
+	if len(parts) > 2 {
+		shareName = parts[2]
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		pool, err := s.engine.GetPool(r.Context(), poolID)
+		if err != nil {
+			httpError(w, err, http.StatusInternalServerError)
+			return
+		}
+		shares := pool.Shares
+		if shares == nil {
+			shares = []engine.Share{}
+		}
+		jsonResp(w, shares)
+	case http.MethodPost:
+		var share engine.Share
+		if err := json.NewDecoder(r.Body).Decode(&share); err != nil {
+			httpError(w, err, http.StatusBadRequest)
+			return
+		}
+		if err := s.engine.CreateShare(r.Context(), poolID, share); err != nil {
+			s.logError("create share %q: %v", share.Name, err)
+			httpError(w, err, http.StatusInternalServerError)
+			return
+		}
+		s.logInfo("share %q created", share.Name)
+		jsonResp(w, map[string]string{"status": "created"})
+	case http.MethodPut:
+		if shareName == "" {
+			httpError(w, fmt.Errorf("missing share name"), http.StatusBadRequest)
+			return
+		}
+		var share engine.Share
+		if err := json.NewDecoder(r.Body).Decode(&share); err != nil {
+			httpError(w, err, http.StatusBadRequest)
+			return
+		}
+		if err := s.engine.UpdateShare(r.Context(), poolID, shareName, share); err != nil {
+			s.logError("update share %q: %v", shareName, err)
+			httpError(w, err, http.StatusInternalServerError)
+			return
+		}
+		s.logInfo("share %q updated", shareName)
+		jsonResp(w, map[string]string{"status": "updated"})
+	case http.MethodDelete:
+		if shareName == "" {
+			httpError(w, fmt.Errorf("missing share name"), http.StatusBadRequest)
+			return
+		}
+		if r.URL.Query().Get("force") != "true" {
+			// Return size for confirmation
+			pool, err := s.engine.GetPool(r.Context(), poolID)
+			if err != nil {
+				httpError(w, err, http.StatusInternalServerError)
+				return
+			}
+			for _, sh := range pool.Shares {
+				if sh.Name == shareName {
+					size, _ := sharing.GetShareSize(sh.Path)
+					jsonResp(w, map[string]interface{}{"confirm": true, "name": shareName, "sizeBytes": size})
+					return
+				}
+			}
+			httpError(w, fmt.Errorf("share %q not found", shareName), http.StatusNotFound)
+			return
+		}
+		if err := s.engine.DeleteShare(r.Context(), poolID, shareName); err != nil {
+			s.logError("delete share %q: %v", shareName, err)
+			httpError(w, err, http.StatusInternalServerError)
+			return
+		}
+		s.logInfo("share %q deleted", shareName)
+		jsonResp(w, map[string]string{"status": "deleted"})
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
+// --- Phase 5: Users ---
+
+func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		pools, err := s.engine.ListPools(r.Context())
+		if err != nil {
+			httpError(w, err, http.StatusInternalServerError)
+			return
+		}
+		var users []engine.NASUser
+		for _, ps := range pools {
+			p, err := s.engine.GetPool(r.Context(), ps.ID)
+			if err != nil {
+				continue
+			}
+			users = append(users, p.Users...)
+		}
+		if users == nil {
+			users = []engine.NASUser{}
+		}
+		jsonResp(w, users)
+	case http.MethodPost:
+		var req struct {
+			Name         string `json:"name"`
+			Password     string `json:"password"`
+			PoolID       string `json:"pool_id"`
+			GlobalAccess bool   `json:"global_access"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			httpError(w, err, http.StatusBadRequest)
+			return
+		}
+		user, err := s.engine.CreateUser(r.Context(), req.PoolID, req.Name, req.Password, req.GlobalAccess)
+		if err != nil {
+			s.logError("create user %q: %v", req.Name, err)
+			httpError(w, err, http.StatusInternalServerError)
+			return
+		}
+		s.logInfo("user %q created", req.Name)
+		jsonResp(w, user)
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) handleUserDelete(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	name := strings.TrimPrefix(r.URL.Path, "/api/users/")
+	if name == "" {
+		httpError(w, fmt.Errorf("missing user name"), http.StatusBadRequest)
+		return
+	}
+	// Find which pool owns this user
+	pools, _ := s.engine.ListPools(r.Context())
+	for _, ps := range pools {
+		p, err := s.engine.GetPool(r.Context(), ps.ID)
+		if err != nil {
+			continue
+		}
+		for _, u := range p.Users {
+			if u.Name == name {
+				if err := s.engine.DeleteUser(r.Context(), ps.ID, name); err != nil {
+					httpError(w, err, http.StatusInternalServerError)
+					return
+				}
+				s.logInfo("user %q deleted", name)
+				jsonResp(w, map[string]string{"status": "deleted"})
+				return
+			}
+		}
+	}
+	httpError(w, fmt.Errorf("user %q not found", name), http.StatusNotFound)
+}
+
+// --- Phase 5: Monitoring ---
+
+func (s *Server) handleMonitoringLive(w http.ResponseWriter, r *http.Request) {
+	if s.collector == nil {
+		httpError(w, fmt.Errorf("monitoring not running"), http.StatusServiceUnavailable)
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	ctx := r.Context()
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			snap := s.collector.Latest()
+			data, _ := json.Marshal(snap)
+			fmt.Fprintf(w, "data: %s\n\n", data)
+			flusher.Flush()
+		}
+	}
+}
+
+func (s *Server) handleMonitoringHistory(w http.ResponseWriter, r *http.Request) {
+	if s.collector == nil {
+		jsonResp(w, []engine.MetricsSnapshot{})
+		return
+	}
+	rangeStr := r.URL.Query().Get("range")
+	dur, err := time.ParseDuration(rangeStr)
+	if err != nil {
+		dur = time.Hour
+	}
+	since := time.Now().Add(-dur)
+	history := s.collector.DiskHistory(since)
+	if history == nil {
+		history = []engine.MetricsSnapshot{}
+	}
+	jsonResp(w, history)
+}
+
+func (s *Server) handleMonitoringClients(w http.ResponseWriter, r *http.Request) {
+	if s.collector == nil {
+		jsonResp(w, []engine.ClientConnection{})
+		return
+	}
+	clients := s.collector.Clients()
+	if clients == nil {
+		clients = []engine.ClientConnection{}
+	}
+	jsonResp(w, clients)
+}
+
+func (s *Server) handleProtocolStatus(w http.ResponseWriter, r *http.Request) {
+	status := map[string]bool{"smb": false, "nfs": false}
+	if s.shares != nil {
+		status["smb"] = s.shares.SMBRunning()
+		status["nfs"] = s.shares.NFSRunning()
+	}
+	jsonResp(w, status)
 }

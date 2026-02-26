@@ -7,19 +7,21 @@ import (
 	"os/exec"
 	"time"
 
+	"github.com/poolforge/poolforge/internal/sharing"
 	"github.com/poolforge/poolforge/internal/storage"
 )
 
 type engineImpl struct {
-	disk storage.DiskManager
-	raid storage.RAIDManager
-	lvm  storage.LVMManager
-	fs   storage.FilesystemManager
-	meta MetadataStore
+	disk   storage.DiskManager
+	raid   storage.RAIDManager
+	lvm    storage.LVMManager
+	fs     storage.FilesystemManager
+	meta   MetadataStore
+	shares *sharing.ShareManager
 }
 
 func NewEngine(disk storage.DiskManager, raid storage.RAIDManager, lvm storage.LVMManager, fs storage.FilesystemManager, meta MetadataStore) EngineService {
-	return &engineImpl{disk: disk, raid: raid, lvm: lvm, fs: fs, meta: meta}
+	return &engineImpl{disk: disk, raid: raid, lvm: lvm, fs: fs, meta: meta, shares: sharing.NewShareManager()}
 }
 
 func (e *engineImpl) CreatePool(ctx context.Context, req CreatePoolRequest) (*Pool, error) {
@@ -304,4 +306,129 @@ func findNextMDIndex() int {
 		}
 	}
 	return 0
+}
+
+// Phase 5: Shares
+
+func (e *engineImpl) CreateShare(ctx context.Context, poolID string, share Share) error {
+	pool, err := e.meta.LoadPool(poolID)
+	if err != nil {
+		return err
+	}
+	for _, s := range pool.Shares {
+		if s.Name == share.Name {
+			return fmt.Errorf("share %q already exists", share.Name)
+		}
+	}
+	ss := toSharingShare(share)
+	if err := e.shares.CreateShare(pool.MountPoint, &ss); err != nil {
+		return err
+	}
+	share.Path = ss.Path
+	pool.Shares = append(pool.Shares, share)
+	if err := e.shares.ApplyConfig(toSharingShares(pool.Shares)); err != nil {
+		return err
+	}
+	pool.UpdatedAt = time.Now()
+	return e.meta.SavePool(pool)
+}
+
+func (e *engineImpl) DeleteShare(ctx context.Context, poolID string, name string) error {
+	pool, err := e.meta.LoadPool(poolID)
+	if err != nil {
+		return err
+	}
+	idx := -1
+	var path string
+	for i, s := range pool.Shares {
+		if s.Name == name {
+			idx = i
+			path = s.Path
+			break
+		}
+	}
+	if idx < 0 {
+		return fmt.Errorf("share %q not found", name)
+	}
+	pool.Shares = append(pool.Shares[:idx], pool.Shares[idx+1:]...)
+	if err := e.shares.ApplyConfig(toSharingShares(pool.Shares)); err != nil {
+		return err
+	}
+	e.shares.DeleteShareDir(path)
+	pool.UpdatedAt = time.Now()
+	return e.meta.SavePool(pool)
+}
+
+func (e *engineImpl) UpdateShare(ctx context.Context, poolID string, name string, share Share) error {
+	pool, err := e.meta.LoadPool(poolID)
+	if err != nil {
+		return err
+	}
+	for i, s := range pool.Shares {
+		if s.Name == name {
+			share.Path = s.Path
+			share.Name = s.Name
+			pool.Shares[i] = share
+			if err := e.shares.ApplyConfig(toSharingShares(pool.Shares)); err != nil {
+				return err
+			}
+			pool.UpdatedAt = time.Now()
+			return e.meta.SavePool(pool)
+		}
+	}
+	return fmt.Errorf("share %q not found", name)
+}
+
+// Phase 5: Users
+
+func (e *engineImpl) CreateUser(ctx context.Context, poolID string, name, password string, globalAccess bool) (*NASUser, error) {
+	pool, err := e.meta.LoadPool(poolID)
+	if err != nil {
+		return nil, err
+	}
+	su, err := sharing.CreateUser(name, password, poolID, globalAccess)
+	if err != nil {
+		return nil, err
+	}
+	user := &NASUser{Name: su.Name, UID: su.UID, PoolID: su.PoolID, GlobalAccess: su.GlobalAccess}
+	pool.Users = append(pool.Users, *user)
+	pool.UpdatedAt = time.Now()
+	return user, e.meta.SavePool(pool)
+}
+
+func (e *engineImpl) DeleteUser(ctx context.Context, poolID string, name string) error {
+	pool, err := e.meta.LoadPool(poolID)
+	if err != nil {
+		return err
+	}
+	idx := -1
+	for i, u := range pool.Users {
+		if u.Name == name {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return fmt.Errorf("user %q not found in pool", name)
+	}
+	sharing.DeleteUser(name)
+	pool.Users = append(pool.Users[:idx], pool.Users[idx+1:]...)
+	pool.UpdatedAt = time.Now()
+	return e.meta.SavePool(pool)
+}
+
+func toSharingShare(s Share) sharing.Share {
+	return sharing.Share{
+		Name: s.Name, Path: s.Path, Protocols: s.Protocols,
+		NFSClients: s.NFSClients, SMBPublic: s.SMBPublic,
+		SMBBrowsable: s.SMBBrowsable, ReadOnly: s.ReadOnly,
+	}
+}
+
+func toSharingShares(shares []Share) []sharing.Share {
+	result := make([]sharing.Share, len(shares))
+	for i, s := range shares {
+		result[i] = toSharingShare(s)
+	}
+	return result
 }

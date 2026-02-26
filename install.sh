@@ -33,7 +33,7 @@ fi
 
 echo "Installing dependencies..."
 apt-get update -qq
-apt-get install -y -qq mdadm lvm2 smartmontools curl > /dev/null 2>&1
+apt-get install -y -qq mdadm lvm2 smartmontools samba nfs-kernel-server curl > /dev/null 2>&1
 echo -e "${GREEN}✓ Dependencies installed${NC}"
 
 echo "Downloading PoolForge..."

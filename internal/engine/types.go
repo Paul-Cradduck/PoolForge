@@ -66,8 +66,58 @@ type Pool struct {
 	VolumeGroup   string
 	LogicalVolume string
 	MountPoint    string
+	Shares        []Share
+	Users         []NASUser
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
+}
+
+type Share struct {
+	Name         string   `json:"name"`
+	Path         string   `json:"path"`
+	Protocols    []string `json:"protocols"`
+	NFSClients   string   `json:"nfs_clients"`
+	SMBPublic    bool     `json:"smb_public"`
+	SMBBrowsable bool     `json:"smb_browsable"`
+	ReadOnly     bool     `json:"read_only"`
+}
+
+type NASUser struct {
+	Name         string `json:"name"`
+	UID          int    `json:"uid"`
+	PoolID       string `json:"pool_id"`
+	GlobalAccess bool   `json:"global_access"`
+}
+
+// Monitoring types
+
+type DiskIOStats struct {
+	Device   string  `json:"device"`
+	ReadMBps float64 `json:"read_mbps"`
+	WriteMBps float64 `json:"write_mbps"`
+	ReadIOPS  float64 `json:"read_iops"`
+	WriteIOPS float64 `json:"write_iops"`
+}
+
+type NetIOStats struct {
+	Interface string  `json:"interface"`
+	RxMBps    float64 `json:"rx_mbps"`
+	TxMBps    float64 `json:"tx_mbps"`
+	Protocol  string  `json:"protocol,omitempty"`
+}
+
+type ClientConnection struct {
+	User        string `json:"user"`
+	IP          string `json:"ip"`
+	Share       string `json:"share"`
+	Protocol    string `json:"protocol"`
+	ConnectedAt int64  `json:"connected_at"`
+}
+
+type MetricsSnapshot struct {
+	Timestamp int64         `json:"ts"`
+	DiskIO    []DiskIOStats `json:"disk_io"`
+	NetIO     []NetIOStats  `json:"net_io"`
 }
 
 type DiskInfo struct {

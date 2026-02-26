@@ -10,7 +10,9 @@ import (
 	"github.com/poolforge/poolforge/internal/api"
 	"github.com/poolforge/poolforge/internal/engine"
 	"github.com/poolforge/poolforge/internal/metadata"
+	"github.com/poolforge/poolforge/internal/monitoring"
 	"github.com/poolforge/poolforge/internal/safety"
+	"github.com/poolforge/poolforge/internal/sharing"
 	"github.com/poolforge/poolforge/internal/storage"
 	"github.com/spf13/cobra"
 )
@@ -247,7 +249,193 @@ func main() {
 	failDiskCmd.MarkFlagRequired("disk")
 	pool.AddCommand(failDiskCmd)
 
-	// serve — web portal + safety daemon
+	// share commands
+	share := &cobra.Command{Use: "share", Short: "Share management commands"}
+	root.AddCommand(share)
+
+	var shareProtos, shareNFSClients string
+	var shareSMBPublic, shareSMBHidden, shareReadOnly, shareForce bool
+	var shareName string
+
+	shareCreateCmd := &cobra.Command{
+		Use:   "create [pool-name]",
+		Short: "Create a new share",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			poolID, err := resolvePoolName(eng, args[0])
+			if err != nil {
+				return err
+			}
+			s := engine.Share{
+				Name: shareName, Protocols: strings.Split(shareProtos, ","),
+				NFSClients: shareNFSClients, SMBPublic: shareSMBPublic,
+				SMBBrowsable: !shareSMBHidden, ReadOnly: shareReadOnly,
+			}
+			if err := eng.CreateShare(context.Background(), poolID, s); err != nil {
+				return err
+			}
+			fmt.Printf("Share %q created\n", shareName)
+			return nil
+		},
+	}
+	shareCreateCmd.Flags().StringVar(&shareName, "name", "", "Share name")
+	shareCreateCmd.Flags().StringVar(&shareProtos, "protocols", "smb", "Protocols: smb,nfs")
+	shareCreateCmd.Flags().StringVar(&shareNFSClients, "nfs-clients", "*", "NFS client restriction")
+	shareCreateCmd.Flags().BoolVar(&shareSMBPublic, "smb-public", false, "Allow guest access")
+	shareCreateCmd.Flags().BoolVar(&shareSMBHidden, "smb-hidden", false, "Hide from network browsing")
+	shareCreateCmd.Flags().BoolVar(&shareReadOnly, "read-only", false, "Read-only share")
+	shareCreateCmd.MarkFlagRequired("name")
+	share.AddCommand(shareCreateCmd)
+
+	share.AddCommand(&cobra.Command{
+		Use: "list [pool-name]", Short: "List shares", Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			poolID, err := resolvePoolName(eng, args[0])
+			if err != nil {
+				return err
+			}
+			p, err := eng.GetPool(context.Background(), poolID)
+			if err != nil {
+				return err
+			}
+			if len(p.Shares) == 0 {
+				fmt.Println("No shares.")
+				return nil
+			}
+			fmt.Printf("%-20s %-12s %-10s %-8s\n", "NAME", "PROTOCOLS", "READ-ONLY", "GUEST")
+			for _, s := range p.Shares {
+				fmt.Printf("%-20s %-12s %-10v %-8v\n", s.Name, strings.Join(s.Protocols, ","), s.ReadOnly, s.SMBPublic)
+			}
+			return nil
+		},
+	})
+
+	shareDeleteCmd := &cobra.Command{
+		Use: "delete [pool-name]", Short: "Delete a share and its data", Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			poolID, err := resolvePoolName(eng, args[0])
+			if err != nil {
+				return err
+			}
+			if !shareForce {
+				p, err := eng.GetPool(context.Background(), poolID)
+				if err != nil {
+					return err
+				}
+				for _, s := range p.Shares {
+					if s.Name == shareName {
+						size, _ := sharing.GetShareSize(s.Path)
+						fmt.Printf("Share %q contains %s of data. Use --force to confirm deletion.\n", shareName, formatBytes(size))
+						return nil
+					}
+				}
+				return fmt.Errorf("share %q not found", shareName)
+			}
+			if err := eng.DeleteShare(context.Background(), poolID, shareName); err != nil {
+				return err
+			}
+			fmt.Printf("Share %q deleted\n", shareName)
+			return nil
+		},
+	}
+	shareDeleteCmd.Flags().StringVar(&shareName, "name", "", "Share name")
+	shareDeleteCmd.Flags().BoolVar(&shareForce, "force", false, "Confirm deletion")
+	shareDeleteCmd.MarkFlagRequired("name")
+	share.AddCommand(shareDeleteCmd)
+
+	// user commands
+	userCmd := &cobra.Command{Use: "user", Short: "User management commands"}
+	root.AddCommand(userCmd)
+
+	var userName, userPool string
+	var userGlobal bool
+
+	userAddCmd := &cobra.Command{
+		Use: "add", Short: "Add a NAS user",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			poolID, err := resolvePoolName(eng, userPool)
+			if err != nil {
+				return err
+			}
+			fmt.Print("Password: ")
+			pw, err := readPassword()
+			fmt.Println()
+			if err != nil {
+				return fmt.Errorf("read password: %w", err)
+			}
+			user, err := eng.CreateUser(context.Background(), poolID, userName, pw, userGlobal)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("User %q created (UID %d)\n", user.Name, user.UID)
+			return nil
+		},
+	}
+	userAddCmd.Flags().StringVar(&userName, "name", "", "Username")
+	userAddCmd.Flags().StringVar(&userPool, "pool", "", "Pool name")
+	userAddCmd.Flags().BoolVar(&userGlobal, "global", false, "Global access across all pools")
+	userAddCmd.MarkFlagRequired("name")
+	userAddCmd.MarkFlagRequired("pool")
+	userCmd.AddCommand(userAddCmd)
+
+	userDeleteCmd := &cobra.Command{
+		Use: "delete", Short: "Delete a NAS user",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// Find user across all pools
+			pools, err := eng.ListPools(context.Background())
+			if err != nil {
+				return err
+			}
+			for _, ps := range pools {
+				p, _ := eng.GetPool(context.Background(), ps.ID)
+				if p == nil {
+					continue
+				}
+				for _, u := range p.Users {
+					if u.Name == userName {
+						if err := eng.DeleteUser(context.Background(), ps.ID, userName); err != nil {
+							return err
+						}
+						fmt.Printf("User %q deleted\n", userName)
+						return nil
+					}
+				}
+			}
+			return fmt.Errorf("user %q not found", userName)
+		},
+	}
+	userDeleteCmd.Flags().StringVar(&userName, "name", "", "Username")
+	userDeleteCmd.MarkFlagRequired("name")
+	userCmd.AddCommand(userDeleteCmd)
+
+	var userListPool string
+	userListCmd := &cobra.Command{
+		Use: "list", Short: "List NAS users",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			pools, err := eng.ListPools(context.Background())
+			if err != nil {
+				return err
+			}
+			fmt.Printf("%-15s %-6s %-15s %-8s\n", "NAME", "UID", "POOL", "GLOBAL")
+			for _, ps := range pools {
+				if userListPool != "" && ps.Name != userListPool {
+					continue
+				}
+				p, _ := eng.GetPool(context.Background(), ps.ID)
+				if p == nil {
+					continue
+				}
+				for _, u := range p.Users {
+					fmt.Printf("%-15s %-6d %-15s %-8v\n", u.Name, u.UID, ps.Name, u.GlobalAccess)
+				}
+			}
+			return nil
+		},
+	}
+	userListCmd.Flags().StringVar(&userListPool, "pool", "", "Filter by pool name")
+	userCmd.AddCommand(userListCmd)
+
+	// serve — web portal + safety daemon + monitoring
 	var serveAddr, serveUser, servePass, webhookURL string
 	serveCmd := &cobra.Command{
 		Use:   "serve",
@@ -266,12 +454,23 @@ func main() {
 			defer cancel()
 			go daemon.Run(ctx)
 
+			// Start monitoring collector
+			collector := monitoring.NewCollector()
+			collector.Start()
+			defer collector.Stop()
+
+			// Share manager
+			shareMgr := sharing.NewShareManager()
+
 			srv := api.NewWithAuth(eng, serveUser, servePass)
 			srv.SetAlerter(daemon.Alerter())
 			srv.SetLogs(daemon.Logs())
 			srv.SetDaemon(daemon)
+			srv.SetCollector(collector)
+			srv.SetShares(shareMgr)
 			fmt.Printf("PoolForge web portal: http://%s\n", serveAddr)
 			fmt.Println("Safety daemon: SMART monitoring, scrub scheduling, metadata backup")
+			fmt.Println("Monitoring: disk IO, network IO, client connections")
 			return http.ListenAndServe(serveAddr, srv)
 		},
 	}
@@ -313,4 +512,10 @@ func formatBytes(b uint64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %ciB", float64(b)/float64(div), "KMGTPE"[exp])
+}
+
+func readPassword() (string, error) {
+	var pw string
+	_, err := fmt.Scanln(&pw)
+	return pw, err
 }

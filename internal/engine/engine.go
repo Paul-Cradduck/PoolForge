@@ -24,6 +24,15 @@ type EngineService interface {
 
 	// Import
 	ImportPool() (*ImportResult, error)
+
+	// Phase 5: Shares
+	CreateShare(ctx context.Context, poolID string, share Share) error
+	DeleteShare(ctx context.Context, poolID string, name string) error
+	UpdateShare(ctx context.Context, poolID string, name string, share Share) error
+
+	// Phase 5: Users
+	CreateUser(ctx context.Context, poolID string, name, password string, globalAccess bool) (*NASUser, error)
+	DeleteUser(ctx context.Context, poolID string, name string) error
 }
 
 // MetadataStore defines the persistence interface.
