@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 
+	"github.com/poolforge/poolforge/internal/api"
 	"github.com/poolforge/poolforge/internal/engine"
 	"github.com/poolforge/poolforge/internal/metadata"
 	"github.com/poolforge/poolforge/internal/storage"
@@ -224,6 +226,20 @@ func main() {
 	failDiskCmd.Flags().StringVar(&failDiskDev, "disk", "", "Disk device to mark failed")
 	failDiskCmd.MarkFlagRequired("disk")
 	pool.AddCommand(failDiskCmd)
+
+	// serve — web portal
+	var serveAddr string
+	serveCmd := &cobra.Command{
+		Use:   "serve",
+		Short: "Start the web management portal",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			srv := api.New(eng)
+			fmt.Printf("PoolForge web portal: http://%s\n", serveAddr)
+			return http.ListenAndServe(serveAddr, srv)
+		},
+	}
+	serveCmd.Flags().StringVar(&serveAddr, "addr", "0.0.0.0:8080", "Listen address")
+	root.AddCommand(serveCmd)
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)

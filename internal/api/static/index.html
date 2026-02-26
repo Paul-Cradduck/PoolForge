@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PoolForge</title>
+<style>
+:root {
+  --bg: #0f1117; --surface: #1a1d27; --border: #2a2d3a;
+  --text: #e4e4e7; --muted: #71717a; --accent: #3b82f6;
+  --green: #22c55e; --yellow: #eab308; --red: #ef4444;
+  --radius: 8px;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+a { color: var(--accent); text-decoration: none; }
+
+.header { padding: 16px 24px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; }
+.header h1 { font-size: 20px; font-weight: 600; }
+.header .logo { width: 28px; height: 28px; background: var(--accent); border-radius: 6px; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; }
+
+.container { max-width: 1100px; margin: 0 auto; padding: 24px; }
+
+.toolbar { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
+
+button, .btn {
+  padding: 8px 16px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--surface); color: var(--text); cursor: pointer; font-size: 13px;
+  transition: border-color 0.15s;
+}
+button:hover, .btn:hover { border-color: var(--accent); }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.danger { border-color: var(--red); color: var(--red); }
+button.danger:hover { background: var(--red); color: #fff; }
+
+.card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 20px; margin-bottom: 16px;
+}
+.card h2 { font-size: 16px; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+
+.badge {
+  display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px;
+  font-weight: 600; text-transform: uppercase;
+}
+.badge.healthy { background: rgba(34,197,94,0.15); color: var(--green); }
+.badge.degraded { background: rgba(234,179,8,0.15); color: var(--yellow); }
+.badge.failed { background: rgba(239,68,68,0.15); color: var(--red); }
+.badge.rebuilding { background: rgba(59,130,246,0.15); color: var(--accent); }
+
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { text-align: left; color: var(--muted); font-weight: 500; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+td { padding: 8px 12px; border-bottom: 1px solid var(--border); }
+
+.progress-bar { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
+.progress-bar .fill { height: 100%; background: var(--accent); border-radius: 3px; transition: width 0.5s; }
+
+.modal-overlay {
+  display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+  z-index: 100; align-items: center; justify-content: center;
+}
+.modal-overlay.active { display: flex; }
+.modal {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 24px; min-width: 400px; max-width: 500px;
+}
+.modal h3 { margin-bottom: 16px; }
+.modal label { display: block; color: var(--muted); font-size: 12px; margin-bottom: 4px; margin-top: 12px; }
+.modal input, .modal select {
+  width: 100%; padding: 8px 10px; background: var(--bg); border: 1px solid var(--border);
+  border-radius: var(--radius); color: var(--text); font-size: 13px;
+}
+.modal .actions { margin-top: 20px; display: flex; gap: 8px; justify-content: flex-end; }
+
+.disk-select { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.disk-chip {
+  padding: 6px 12px; border: 1px solid var(--border); border-radius: var(--radius);
+  cursor: pointer; font-size: 12px; transition: all 0.15s;
+}
+.disk-chip:hover { border-color: var(--accent); }
+.disk-chip.selected { border-color: var(--accent); background: rgba(59,130,246,0.15); }
+
+.empty { text-align: center; padding: 48px; color: var(--muted); }
+.toast {
+  position: fixed; bottom: 24px; right: 24px; padding: 12px 20px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  font-size: 13px; z-index: 200; opacity: 0; transition: opacity 0.3s;
+}
+.toast.show { opacity: 1; }
+.toast.error { border-color: var(--red); }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="logo">P</div>
+  <h1>PoolForge</h1>
+</div>
+
+<div class="container">
+  <div class="toolbar">
+    <button class="primary" onclick="showCreateModal()">+ Create Pool</button>
+    <button onclick="refresh()">↻ Refresh</button>
+  </div>
+  <div id="pools"></div>
+</div>
+
+<!-- Create Pool Modal -->
+<div class="modal-overlay" id="createModal">
+  <div class="modal">
+    <h3>Create Pool</h3>
+    <label>Pool Name</label>
+    <input id="poolName" placeholder="mypool">
+    <label>Parity Mode</label>
+    <select id="parityMode"><option value="shr1">SHR-1 (single parity)</option><option value="shr2">SHR-2 (dual parity)</option></select>
+    <label>Select Disks (min 2)</label>
+    <div class="disk-select" id="diskSelect"></div>
+    <div class="actions">
+      <button onclick="closeModal('createModal')">Cancel</button>
+      <button class="primary" onclick="createPool()">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- Action Modal (add/replace/fail) -->
+<div class="modal-overlay" id="actionModal">
+  <div class="modal">
+    <h3 id="actionTitle">Action</h3>
+    <div id="actionBody"></div>
+    <div class="actions">
+      <button onclick="closeModal('actionModal')">Cancel</button>
+      <button class="primary" id="actionSubmit">Submit</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const API = '/api';
+let availableDisks = [];
+
+async function api(path, opts) {
+  const r = await fetch(API + path, opts);
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.error || r.statusText);
+  return data;
+}
+
+function toast(msg, isError) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show' + (isError ? ' error' : '');
+  setTimeout(() => t.className = 'toast', 3000);
+}
+
+function badge(state) {
+  return `<span class="badge ${state}">${state}</span>`;
+}
+
+function fmtBytes(b) {
+  if (b >= 1e9) return (b / 1e9).toFixed(1) + ' GB';
+  if (b >= 1e6) return (b / 1e6).toFixed(1) + ' MB';
+  return (b / 1e3).toFixed(0) + ' KB';
+}
+
+async function refresh() {
+  try {
+    const pools = await api('/pools');
+    const el = document.getElementById('pools');
+    if (!pools || pools.length === 0) {
+      el.innerHTML = '<div class="empty">No pools yet. Create one to get started.</div>';
+      return;
+    }
+    let html = '';
+    for (const p of pools) {
+      const status = await api('/pools/' + p.ID);
+      html += renderPool(p, status);
+    }
+    el.innerHTML = html;
+  } catch (e) { toast(e.message, true); }
+}
+
+function renderPool(summary, status) {
+  const pool = status.Pool;
+  const arrays = status.ArrayStatuses || [];
+  const disks = status.DiskStatuses || [];
+
+  let arrayRows = arrays.map(a =>
+    `<tr><td>${a.Device}</td><td>RAID${a.RAIDLevel}</td><td>Tier ${a.TierIndex}</td>
+     <td>${badge(a.State)}</td><td>${fmtBytes(a.CapacityBytes)}</td>
+     <td style="font-size:11px;color:var(--muted)">${(a.Members||[]).join(', ')}</td></tr>`
+  ).join('');
+
+  let diskRows = disks.map(d =>
+    `<tr><td>${d.Device}</td><td>${badge(d.State)}</td>
+     <td style="font-size:11px;color:var(--muted)">${(d.ContributingArrays||[]).join(', ')}</td></tr>`
+  ).join('');
+
+  const rebuilding = arrays.some(a => a.State === 'rebuilding');
+
+  return `
+  <div class="card">
+    <h2>${pool.Name} ${badge(pool.State)}
+      <span style="flex:1"></span>
+      <button onclick="showAddDisk('${pool.ID}')">+ Disk</button>
+      <button onclick="showFailDisk('${pool.ID}')">⚠ Fail</button>
+      <button onclick="showReplaceDisk('${pool.ID}')">↺ Replace</button>
+      ${rebuilding ? `<button onclick="watchRebuild('${pool.ID}')">📊 Rebuild</button>` : ''}
+      <button class="danger" onclick="deletePool('${pool.ID}','${pool.Name}')">✕ Delete</button>
+    </h2>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:12px">
+      ID: ${pool.ID} &nbsp;|&nbsp; Mount: ${pool.MountPoint} &nbsp;|&nbsp; VG: ${pool.VolumeGroup}
+    </div>
+    <div id="rebuild-${pool.ID}"></div>
+    <h3 style="font-size:13px;margin:12px 0 6px">Arrays</h3>
+    <table><tr><th>Device</th><th>Level</th><th>Tier</th><th>State</th><th>Capacity</th><th>Members</th></tr>${arrayRows}</table>
+    <h3 style="font-size:13px;margin:12px 0 6px">Disks</h3>
+    <table><tr><th>Device</th><th>State</th><th>Arrays</th></tr>${diskRows}</table>
+  </div>`;
+}
+
+// --- Create Pool ---
+async function showCreateModal() {
+  try { availableDisks = await api('/disks'); } catch(e) { availableDisks = []; }
+  const el = document.getElementById('diskSelect');
+  el.innerHTML = availableDisks.map(d =>
+    `<div class="disk-chip" data-dev="${d.device}" onclick="this.classList.toggle('selected')">${d.device} (${d.sizeGB.toFixed(1)}G)</div>`
+  ).join('') || '<span style="color:var(--muted)">No available disks found</span>';
+  document.getElementById('createModal').classList.add('active');
+}
+
+async function createPool() {
+  const name = document.getElementById('poolName').value.trim();
+  const parity = document.getElementById('parityMode').value;
+  const chips = document.querySelectorAll('#diskSelect .disk-chip.selected');
+  const disks = Array.from(chips).map(c => c.dataset.dev);
+  if (!name) return toast('Enter a pool name', true);
+  if (disks.length < 2) return toast('Select at least 2 disks', true);
+  try {
+    await api('/pools', { method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({name, disks, parityMode: parity}) });
+    closeModal('createModal');
+    toast('Pool created');
+    refresh();
+  } catch(e) { toast(e.message, true); }
+}
+
+// --- Disk Actions ---
+function showAddDisk(poolID) {
+  showAction('Add Disk', `<label>Disk Device</label><input id="actDisk" placeholder="/dev/nvme3n1">`,
+    async () => {
+      await api('/pools/' + poolID + '/disks', { method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({disk: document.getElementById('actDisk').value}) });
+      toast('Disk added'); closeModal('actionModal'); refresh();
+    });
+}
+
+function showFailDisk(poolID) {
+  showAction('Mark Disk Failed', `<label>Disk Device</label><input id="actDisk" placeholder="/dev/nvme2n1">`,
+    async () => {
+      await api('/pools/' + poolID + '/fail-disk', { method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({disk: document.getElementById('actDisk').value}) });
+      toast('Disk marked failed'); closeModal('actionModal'); refresh();
+    });
+}
+
+function showReplaceDisk(poolID) {
+  showAction('Replace Disk', `
+    <label>Failed Disk</label><input id="actOld" placeholder="/dev/nvme2n1">
+    <label>New Disk</label><input id="actNew" placeholder="/dev/nvme3n1">`,
+    async () => {
+      await api('/pools/' + poolID + '/replace-disk', { method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({oldDisk: document.getElementById('actOld').value, newDisk: document.getElementById('actNew').value}) });
+      toast('Disk replaced — rebuilding'); closeModal('actionModal'); refresh();
+    });
+}
+
+function showAction(title, bodyHTML, onSubmit) {
+  document.getElementById('actionTitle').textContent = title;
+  document.getElementById('actionBody').innerHTML = bodyHTML;
+  const btn = document.getElementById('actionSubmit');
+  btn.onclick = async () => { try { await onSubmit(); } catch(e) { toast(e.message, true); } };
+  document.getElementById('actionModal').classList.add('active');
+}
+
+async function deletePool(id, name) {
+  if (!confirm('Delete pool "' + name + '"? This will destroy all data.')) return;
+  try {
+    await api('/pools/' + id, { method: 'DELETE' });
+    toast('Pool deleted'); refresh();
+  } catch(e) { toast(e.message, true); }
+}
+
+// --- SSE Rebuild Watch ---
+function watchRebuild(poolID) {
+  const el = document.getElementById('rebuild-' + poolID);
+  if (!el) return;
+  el.innerHTML = '<div style="font-size:12px;color:var(--muted)">Watching rebuild...</div>';
+  const es = new EventSource(API + '/pools/' + poolID + '/rebuild');
+  es.onmessage = (e) => {
+    const status = JSON.parse(e.data);
+    const arrays = status.ArrayStatuses || [];
+    let html = '';
+    for (const a of arrays) {
+      if (a.State === 'rebuilding') {
+        html += `<div style="margin:4px 0;font-size:12px">${a.Device} rebuilding...
+          <div class="progress-bar"><div class="fill" style="width:0%"></div></div></div>`;
+      }
+    }
+    if (html) el.innerHTML = html; else el.innerHTML = '<div style="font-size:12px;color:var(--green)">✓ Rebuild complete</div>';
+  };
+  es.addEventListener('done', () => { es.close(); refresh(); });
+  es.addEventListener('error', () => { es.close(); el.innerHTML = ''; });
+}
+
+function closeModal(id) { document.getElementById(id).classList.remove('active'); }
+
+// Close modals on overlay click
+document.querySelectorAll('.modal-overlay').forEach(el => {
+  el.addEventListener('click', e => { if (e.target === el) el.classList.remove('active'); });
+});
+
+// Initial load
+refresh();
+// Auto-refresh every 10s
+setInterval(refresh, 10000);
+</script>
+</body>
+</html>
