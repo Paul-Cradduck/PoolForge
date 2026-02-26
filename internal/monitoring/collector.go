@@ -198,6 +198,9 @@ func readDiskStats() map[string]diskRaw {
 		if strings.HasPrefix(name, "sd") && len(name) > 3 {
 			continue // sda1 etc
 		}
+		if strings.HasPrefix(name, "nvme") && strings.Contains(name, "p") {
+			continue // nvme0n1p1 etc
+		}
 		readOps, _ := strconv.ParseUint(fields[3], 10, 64)
 		readSectors, _ := strconv.ParseUint(fields[5], 10, 64)
 		writeOps, _ := strconv.ParseUint(fields[7], 10, 64)

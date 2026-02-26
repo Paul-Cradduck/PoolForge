@@ -45,7 +45,8 @@ func (b *NFSBackend) WriteExports(shares []Share) error {
 	if err := os.WriteFile(exportsPath, []byte(content), 0644); err != nil {
 		return fmt.Errorf("write exports: %w", err)
 	}
-	return exec.Command("exportfs", "-ra").Run()
+	exec.Command("exportfs", "-ra").Run()
+	return nil
 }
 
 func (b *NFSBackend) ManageService(needed bool) {

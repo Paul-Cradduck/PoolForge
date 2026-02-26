@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -48,6 +49,7 @@ func (b *SMBBackend) WriteConfig(shares []Share) error {
 		buf.WriteString("\n")
 	}
 
+	os.MkdirAll(filepath.Dir(smbConfPath), 0755)
 	if err := os.WriteFile(smbConfPath, []byte(buf.String()), 0644); err != nil {
 		return fmt.Errorf("write smb config: %w", err)
 	}
