@@ -1,6 +1,6 @@
 # PoolForge
 
-Open-source Synology Hybrid RAID (SHR) clone for Ubuntu LTS. Combines mixed-size disks into a single storage pool with RAID redundancy using mdadm and LVM.
+Open-source hybrid RAID storage manager for Ubuntu LTS. Combines mixed-size disks into a single storage pool with RAID redundancy using mdadm and LVM.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -23,10 +23,10 @@ Open-source Synology Hybrid RAID (SHR) clone for Ubuntu LTS. Combines mixed-size
 
 ## How It Works
 
-PoolForge implements the same tiered slicing algorithm as Synology's SHR:
+PoolForge implements a tiered slicing algorithm:
 
 1. **Sorts disks by capacity** and computes capacity tiers — each tier represents a slice size where a group of disks can contribute equally
-2. **Creates RAID arrays** for each tier (RAID1 for 2 disks, RAID5 for 3+, RAID6 with SHR2)
+2. **Creates RAID arrays** for each tier (RAID1 for 2 disks, RAID5 for 3+, RAID6 for dual parity)
 3. **Combines arrays into a single LVM volume** with an ext4 filesystem
 4. **Maximizes usable space** — larger disks contribute their extra capacity to higher tiers that smaller disks can't reach
 
@@ -107,7 +107,7 @@ Dark-themed single-page dashboard at `http://your-server:8080`.
 │  PoolForge Dashboard                              [Create Pool] │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
-│  Pool: mypool (healthy)                    4 disks │ SHR1       │
+│  Pool: mypool (healthy)                    4 disks │ parity1    │
 │                                                                 │
 │  Capacity  [██████████████████░░░░░░░░▓▓▓▓▓▓░░]                │
 │             Used: 12GB   Free: 6GB   Parity: 5GB   OH: 1GB     │
@@ -157,7 +157,7 @@ Dark-themed single-page dashboard at `http://your-server:8080`.
 
 ```bash
 # Pool operations
-poolforge pool create --name mypool --disks /dev/sda,/dev/sdb,/dev/sdc --parity shr1
+poolforge pool create --name mypool --disks /dev/sda,/dev/sdb,/dev/sdc --parity parity1
 poolforge pool list
 poolforge pool status mypool
 poolforge pool delete mypool
@@ -268,7 +268,7 @@ Import automatically:
 - Remaps md device names by matching array members
 - Fixes stale superblocks if arrays were modified before migration
 
-Same-size disks are handled correctly — SHR gives identical disks identical slice layouts, making them interchangeable.
+Same-size disks are handled correctly — PoolForge gives identical disks identical slice layouts, making them interchangeable.
 
 ## Safety Features
 
@@ -305,7 +305,7 @@ All run automatically via the background safety daemon:
 ## Parity Modes
 
 ```
-  SHR1 (1-disk fault tolerance)          SHR2 (2-disk fault tolerance)
+  parity1 (1-disk fault tolerance)        parity2 (2-disk fault tolerance)
   ┌──────────────────────────┐           ┌──────────────────────────┐
   │  2 disks → RAID1 (mirror)│           │  3 disks → RAID6         │
   │  3+ disks → RAID5        │           │  4+ disks → RAID6        │
@@ -320,8 +320,8 @@ All run automatically via the background safety daemon:
 
 | Mode | Min Disks | Redundancy | Description |
 |------|-----------|------------|-------------|
-| SHR1 | 2 | 1 disk failure | RAID1 (2 disks) or RAID5 (3+) per tier |
-| SHR2 | 3 | 2 disk failures | RAID6 per tier |
+| parity1 | 2 | 1 disk failure | RAID1 (2 disks) or RAID5 (3+) per tier |
+| parity2 | 3 | 2 disk failures | RAID6 per tier |
 
 ## Performance
 
