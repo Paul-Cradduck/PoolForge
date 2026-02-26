@@ -1,30 +1,48 @@
-# Phase 5: NAS File Sharing
+# Phase 5: NAS File Sharing & Monitoring
 
 ## Requirements
 
-### R1 — Shared Folders
-Users must be able to create named shared folders within a pool that are exposed over the network via SMB and/or NFS. Each share is a subdirectory of the pool mount point.
+### Sharing
 
-### R2 — SMB Protocol
-Shares must be accessible via SMB (Samba) for Windows, macOS, and Linux clients. Shares support authenticated access via PoolForge-managed users or optional guest access.
+**R1 — Shared Folders**
+Users must be able to create named shared folders within a pool exposed over SMB and/or NFS. Each share is a subdirectory of the pool mount point. Deleting a share deletes the underlying data after a confirmation check (CLI: `--force` flag, UI: confirmation dialog showing directory size).
 
-### R3 — NFS Protocol
-Shares must be accessible via NFS for Linux/Unix clients. Each share supports client restrictions by CIDR or hostname. NFSv4 by default.
+**R2 — SMB Protocol**
+Shares accessible via Samba for Windows, macOS, and Linux clients. Per-share toggles for: guest access, read-only, and network browsing visibility. Samba workgroup and server name configurable via `/etc/poolforge.conf` and the web UI.
 
-### R4 — User Management
-PoolForge must manage its own user database for SMB authentication. Users map to POSIX UIDs for consistent file ownership. No external directory services (LDAP/AD) in this phase.
+**R3 — NFS Protocol**
+Shares accessible via NFS (v4 default) for Linux/Unix clients. Per-share client restriction by CIDR or hostname.
 
-### R5 — CLI
-All share and user operations must be available via CLI commands.
+**R4 — User Management**
+Pool-scoped users with optional global access flag. All-or-nothing access — every user in a pool can access every share in that pool. Users map to POSIX UIDs (poolforge group) and Samba passwords. User creation available in both CLI (password prompt) and web UI (password field). Packages (samba, nfs-kernel-server) pre-installed by install.sh.
 
-### R6 — REST API
-All share and user operations must be exposed via the existing REST API with basic auth.
+**R5 — Service Lifecycle**
+PoolForge installs, configures, starts, and stops smbd/nmbd and nfs-kernel-server automatically. Services start when the first share using that protocol is created and stop when the last share using it is deleted.
 
-### R7 — Web Portal
-The dashboard must include panels for managing shares and users, with protocol status indicators.
+### Monitoring
 
-### R8 — Service Lifecycle
-PoolForge must install, configure, start, and stop smbd/nmbd and nfs-kernel-server automatically as shares are created or deleted.
+**R6 — Disk Performance**
+Real-time per-disk and per-array IOPS and throughput (read/write MB/s) from iostat data. Displayed as gauges on a dedicated monitoring tab.
+
+**R7 — Network IO**
+Real-time per-interface throughput (in/out) and per-protocol breakdown (SMB vs NFS throughput). Displayed as gauges.
+
+**R8 — Client Connections**
+Live list of connected clients: username, IP address, share name, protocol, connection duration. Read-only (no kick/disconnect).
+
+**R9 — Data Retention**
+In-memory rolling buffer (5 minutes, 1-second resolution) for live gauges. On-disk log file with 30-day historical data (sampled at lower resolution for storage efficiency). Monitoring tab shows live gauges with recent history on page load.
+
+### Interface
+
+**R10 — CLI**
+All share and user operations available via CLI commands.
+
+**R11 — REST API**
+All share, user, and monitoring operations exposed via REST API.
+
+**R12 — Web Portal**
+Shares panel with CRUD, users panel with add/delete (including password field), protocol status indicators. Dedicated monitoring tab with gauges for disk IO, network IO, and client connection list.
 
 ---
 
@@ -33,19 +51,21 @@ PoolForge must install, configure, start, and stop smbd/nmbd and nfs-kernel-serv
 ### Data Model
 
 ```go
-// Added to pool metadata
 type Share struct {
-    Name       string   `json:"name"`        // "documents"
-    Path       string   `json:"path"`        // "/mnt/poolforge/mypool/documents"
-    Protocols  []string `json:"protocols"`   // ["smb"], ["nfs"], or ["smb","nfs"]
-    NFSClients string   `json:"nfs_clients"` // "192.168.1.0/24" or "*"
-    SMBPublic  bool     `json:"smb_public"`  // guest access
-    ReadOnly   bool     `json:"read_only"`
+    Name        string   `json:"name"`
+    Path        string   `json:"path"`
+    Protocols   []string `json:"protocols"`    // ["smb"], ["nfs"], or ["smb","nfs"]
+    NFSClients  string   `json:"nfs_clients"`  // "192.168.1.0/24" or "*"
+    SMBPublic   bool     `json:"smb_public"`   // guest access
+    SMBBrowsable bool   `json:"smb_browsable"` // visible in network browsing
+    ReadOnly    bool     `json:"read_only"`
 }
 
 type NASUser struct {
-    Name string `json:"name"`
-    UID  int    `json:"uid"`
+    Name       string `json:"name"`
+    UID        int    `json:"uid"`
+    PoolID     string `json:"pool_id"`     // scoped to pool
+    GlobalAccess bool `json:"global_access"` // access all pools
 }
 
 // Added to Pool struct
@@ -53,6 +73,32 @@ type Pool struct {
     // ... existing fields ...
     Shares []Share   `json:"shares,omitempty"`
     Users  []NASUser `json:"users,omitempty"`
+}
+
+// Monitoring types
+type DiskStats struct {
+    Device       string  `json:"device"`
+    ReadMBps     float64 `json:"read_mbps"`
+    WriteMBps    float64 `json:"write_mbps"`
+    ReadIOPS     float64 `json:"read_iops"`
+    WriteIOPS    float64 `json:"write_iops"`
+    Timestamp    int64   `json:"ts"`
+}
+
+type NetStats struct {
+    Interface    string  `json:"interface"`
+    RxMBps       float64 `json:"rx_mbps"`
+    TxMBps       float64 `json:"tx_mbps"`
+    Protocol     string  `json:"protocol,omitempty"` // "smb", "nfs", or "" for interface
+    Timestamp    int64   `json:"ts"`
+}
+
+type ClientConnection struct {
+    User       string `json:"user"`
+    IP         string `json:"ip"`
+    Share      string `json:"share"`
+    Protocol   string `json:"protocol"`
+    ConnectedAt int64 `json:"connected_at"`
 }
 ```
 
@@ -68,14 +114,21 @@ type Pool struct {
 
 ### SMB Configuration
 
-PoolForge writes a dedicated include file rather than editing smb.conf directly:
+PoolForge writes a dedicated include file:
 
 ```
-/etc/samba/smb.conf          ← system config, adds: include = /etc/samba/poolforge.conf
-/etc/samba/poolforge.conf    ← PoolForge-managed shares
+/etc/samba/smb.conf          ← adds: include = /etc/samba/poolforge.conf
+/etc/samba/poolforge.conf    ← PoolForge-managed
 ```
 
-Generated per share:
+Global section in poolforge.conf:
+```ini
+[global]
+   workgroup = WORKGROUP
+   server string = PoolForge NAS
+```
+
+Per-share section:
 ```ini
 [documents]
    path = /mnt/poolforge/mypool/documents
@@ -85,12 +138,15 @@ Generated per share:
    valid users = @poolforge
 ```
 
-Users are added to Samba via `smbpasswd` and to a `poolforge` POSIX group for file permissions.
+Configurable in `/etc/poolforge.conf`:
+```ini
+POOLFORGE_SMB_WORKGROUP=WORKGROUP
+POOLFORGE_SMB_SERVER_NAME=PoolForge NAS
+```
 
 ### NFS Configuration
 
-PoolForge appends exports with marker comments to `/etc/exports`:
-
+Marker-delimited block in `/etc/exports`:
 ```
 # BEGIN POOLFORGE
 /mnt/poolforge/mypool/documents 192.168.1.0/24(rw,sync,no_subtree_check)
@@ -100,6 +156,57 @@ PoolForge appends exports with marker comments to `/etc/exports`:
 
 Runs `exportfs -ra` after changes.
 
+### Monitoring Architecture
+
+```
+  ┌─────────────────────────────────────────────────────────┐
+  │                  Monitoring Collector                     │
+  │                (1-second sample loop)                     │
+  │                                                          │
+  │  ┌────────────┐  ┌────────────┐  ┌───────────────────┐  │
+  │  │  Disk IO   │  │ Network IO │  │    Connections     │  │
+  │  │ /proc/     │  │ /proc/net/ │  │ smbstatus          │  │
+  │  │ diskstats  │  │ dev + ss   │  │ showmount/nfsstat  │  │
+  │  └─────┬──────┘  └─────┬──────┘  └────────┬──────────┘  │
+  │        │               │                   │             │
+  │        ▼               ▼                   ▼             │
+  │  ┌──────────────────────────────────────────────────┐    │
+  │  │         Ring Buffer (5 min, 1s resolution)       │    │
+  │  │              300 samples per metric               │    │
+  │  └──────────────────────┬───────────────────────────┘    │
+  │                         │                                │
+  │                    every 60s                              │
+  │                         ▼                                │
+  │  ┌──────────────────────────────────────────────────┐    │
+  │  │     Disk Log (30 days, 1-min resolution)         │    │
+  │  │     /var/lib/poolforge/metrics.log                │    │
+  │  │     Auto-rotated, old entries pruned              │    │
+  │  └──────────────────────────────────────────────────┘    │
+  └─────────────────────────────────────────────────────────┘
+                            │
+                       SSE stream
+                            ▼
+  ┌─────────────────────────────────────────────────────────┐
+  │                   Monitoring Tab                         │
+  │                                                          │
+  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐   │
+  │  │ Disk R/W │ │ Disk IOPS│ │ Net In/  │ │ SMB/NFS  │   │
+  │  │  Gauge   │ │  Gauge   │ │ Out Gauge│ │  Gauge   │   │
+  │  └──────────┘ └──────────┘ └──────────┘ └──────────┘   │
+  │                                                          │
+  │  Connected Clients ─────────────────────────────────     │
+  │  bob    192.168.1.10   documents   SMB   2h 15m         │
+  │  alice  192.168.1.22   media       NFS   45m            │
+  └─────────────────────────────────────────────────────────┘
+```
+
+Data sources:
+- Disk IO: `/proc/diskstats` (parsed, delta between samples)
+- Network IO: `/proc/net/dev` (parsed, delta between samples)
+- Protocol breakdown: `ss` filtered by port 445 (SMB) and 2049 (NFS) byte counters
+- SMB clients: `smbstatus --json` or parsed text output
+- NFS clients: `/proc/fs/nfsd/clients/` or `ss` on port 2049
+
 ### API Endpoints
 
 | Method | Path | Description |
@@ -107,95 +214,87 @@ Runs `exportfs -ra` after changes.
 | POST | `/api/pools/{id}/shares` | Create share |
 | GET | `/api/pools/{id}/shares` | List shares |
 | PUT | `/api/pools/{id}/shares/{name}` | Update share |
-| DELETE | `/api/pools/{id}/shares/{name}` | Delete share |
-| POST | `/api/users` | Create user |
+| DELETE | `/api/pools/{id}/shares/{name}` | Delete share (requires `?force=true`) |
+| POST | `/api/users` | Create user `{"name","password","pool_id","global_access"}` |
 | GET | `/api/users` | List users |
 | DELETE | `/api/users/{name}` | Delete user |
+| GET | `/api/monitoring/live` | SSE stream of real-time metrics |
+| GET | `/api/monitoring/history?range=1h` | Historical metrics from disk log |
+| GET | `/api/monitoring/clients` | Current client connections |
 
 ### CLI Commands
 
 ```bash
 # Shares
-poolforge share create <pool> --name <name> --protocols smb,nfs [--nfs-clients "192.168.1.0/24"] [--smb-public] [--read-only]
+poolforge share create <pool> --name <name> --protocols smb,nfs \
+    [--nfs-clients "192.168.1.0/24"] [--smb-public] [--smb-hidden] [--read-only]
 poolforge share list <pool>
-poolforge share update <pool> --name <name> [--protocols ...] [--read-only]
-poolforge share delete <pool> --name <name>
+poolforge share update <pool> --name <name> [--protocols ...] [--read-only] [--smb-hidden]
+poolforge share delete <pool> --name <name> [--force]
 
 # Users
-poolforge user add --name <name>       # prompts for password
+poolforge user add --name <name> --pool <pool> [--global]   # prompts for password
 poolforge user delete --name <name>
-poolforge user list
+poolforge user list [--pool <pool>]
 ```
-
-### Service Management
-
-- `share create` with SMB → ensure samba installed, write config, start smbd/nmbd
-- `share create` with NFS → ensure nfs-kernel-server installed, write exports, start nfs-server
-- `share delete` (last SMB share removed) → stop smbd/nmbd
-- `share delete` (last NFS share removed) → stop nfs-server
-- `install.sh` updated to include samba and nfs-kernel-server as optional dependencies
-
-### Web Portal Additions
-
-- **Shares panel**: table of shares with name, protocols, access, actions (edit/delete)
-- **Create share dialog**: name, protocol checkboxes, NFS client field, guest toggle, read-only toggle
-- **Users panel**: table with add/delete
-- **Status bar**: SMB ✓/✗, NFS ✓/✗ indicators next to existing safety status
 
 ---
 
 ## Tasks
 
-### T1 — Data model & types
-- Add `Share` and `NASUser` structs to `internal/engine/types.go`
-- Add `Shares` and `Users` fields to `Pool` struct
+### Sharing
 
-### T2 — Share manager
-- Create `internal/sharing/manager.go` — `ShareManager` interface
-- Methods: `CreateShare`, `DeleteShare`, `UpdateShare`, `ListShares`
-- Creates subdirectory, sets ownership/permissions
+**T1 — Data model & types**
+Add `Share`, `NASUser` structs and monitoring types to `internal/engine/types.go`. Add `Shares` and `Users` fields to `Pool`.
 
-### T3 — SMB backend
-- Create `internal/sharing/smb.go`
-- Write `/etc/samba/poolforge.conf` from share list
-- Add `include` line to `/etc/samba/smb.conf` if missing
-- Start/stop smbd/nmbd based on active SMB shares
+**T2 — Share manager**
+Create `internal/sharing/manager.go` with `ShareManager` interface. Methods: `CreateShare`, `DeleteShare`, `UpdateShare`, `ListShares`. Creates/removes subdirectories, sets ownership to poolforge group.
 
-### T4 — NFS backend
-- Create `internal/sharing/nfs.go`
-- Write marker-delimited block in `/etc/exports`
-- Run `exportfs -ra` after changes
-- Start/stop nfs-server based on active NFS shares
+**T3 — SMB backend**
+Create `internal/sharing/smb.go`. Generates `/etc/samba/poolforge.conf` from share list. Adds include line to smb.conf. Reads workgroup/server name from poolforge.conf. Manages smbd/nmbd lifecycle.
 
-### T5 — User management
-- Create `internal/sharing/users.go`
-- Create POSIX user + add to `poolforge` group
-- Set Samba password via `smbpasswd`
-- Delete user from both POSIX and Samba
-- Store user list in pool metadata
+**T4 — NFS backend**
+Create `internal/sharing/nfs.go`. Writes marker-delimited block in `/etc/exports`. Runs `exportfs -ra`. Manages nfs-server lifecycle.
 
-### T6 — Engine integration
-- Add share/user methods to `EngineService` interface
-- Wire `ShareManager` into engine, delegate calls
-- Save/load shares and users via existing metadata store
+**T5 — User management**
+Create `internal/sharing/users.go`. Creates POSIX user + poolforge group membership. Sets Samba password via `smbpasswd`. Handles pool-scoped and global access. Stores in pool metadata.
 
-### T7 — CLI commands
-- Add `share create/list/update/delete` subcommands to `cmd/poolforge/main.go`
-- Add `user add/delete/list` subcommands
-- Password prompt for `user add`
+**T6 — Share deletion safety**
+Confirmation check: calculate directory size, require `--force` in CLI, confirmation dialog in UI showing size. Then `rm -rf` the directory.
 
-### T8 — REST API
-- Register share and user endpoints in `internal/api/server.go`
-- JSON request/response matching the data model
+### Monitoring
 
-### T9 — Web portal
-- Shares panel with CRUD
-- Users panel with add/delete
-- Protocol status indicators
-- Create share dialog with protocol/access options
+**T7 — Metrics collector**
+Create `internal/monitoring/collector.go`. 1-second sample loop reading `/proc/diskstats` and `/proc/net/dev`. Computes deltas for rates. Stores in ring buffer (5 min / 300 samples).
 
-### T10 — Install script update
-- Add `samba` and `nfs-kernel-server` to `install.sh` package list
+**T8 — Protocol & connection tracking**
+Parse `smbstatus` for SMB clients. Parse `ss` on port 2049 for NFS clients. Use `ss` byte counters filtered by port for per-protocol throughput.
+
+**T9 — Disk log**
+Create `internal/monitoring/disklog.go`. Every 60s, append averaged sample to `/var/lib/poolforge/metrics.log`. Prune entries older than 30 days on startup and daily.
+
+**T10 — Monitoring SSE endpoint**
+Add `/api/monitoring/live` SSE stream pushing latest metrics every second. Add `/api/monitoring/history` returning disk log data for requested time range. Add `/api/monitoring/clients` returning current connections.
+
+### Integration
+
+**T11 — Engine integration**
+Add share/user/monitoring methods to `EngineService` interface. Wire `ShareManager` and `MetricsCollector` into engine.
+
+**T12 — CLI commands**
+Add `share create/list/update/delete` and `user add/delete/list` subcommands. Password prompt for user add. `--force` flag for share delete.
+
+**T13 — REST API**
+Register share, user, and monitoring endpoints in `internal/api/server.go`.
+
+**T14 — Web portal — Shares & Users**
+Shares panel with create dialog (name, protocols, NFS clients, guest toggle, browsable toggle, read-only toggle). Users panel with add (name + password field) and delete. Protocol status indicators (SMB ✓/✗, NFS ✓/✗).
+
+**T15 — Web portal — Monitoring tab**
+Dedicated tab with gauges for: disk read/write MB/s, disk IOPS, network in/out, SMB/NFS throughput. Client connection table. SSE-driven live updates. Historical view from disk log.
+
+**T16 — Install script update**
+Add `samba` and `nfs-kernel-server` to `install.sh` package list.
 
 ---
 
@@ -204,6 +303,8 @@ poolforge user list
 - iSCSI targets
 - FTP / SFTP
 - Per-user quotas
-- Fine-grained ACLs
+- Per-share user ACLs (currently all-or-nothing per pool)
 - Time Machine backup targets
 - Recycle bin / snapshots
+- Client kick/disconnect from UI
+- Historical graphs (only gauges + raw log in this phase)
