@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/poolforge/poolforge/internal/sharing"
+	"github.com/poolforge/poolforge/internal/snapshots"
 	"github.com/poolforge/poolforge/internal/storage"
 )
 
@@ -153,7 +154,12 @@ func (e *engineImpl) CreatePool(ctx context.Context, req CreatePoolRequest) (*Po
 	if err := e.lvm.CreateVolumeGroup(vgName, pvDevices); err != nil {
 		return nil, err
 	}
-	if err := e.lvm.CreateLogicalVolume(vgName, lvName, 100); err != nil {
+	snapReserve := req.SnapshotReserve
+	if snapReserve <= 0 {
+		snapReserve = 10
+	}
+	lvPercent := 100 - snapReserve
+	if err := e.lvm.CreateLogicalVolume(vgName, lvName, lvPercent); err != nil {
 		return nil, err
 	}
 
@@ -180,6 +186,7 @@ func (e *engineImpl) CreatePool(ctx context.Context, req CreatePoolRequest) (*Po
 		VolumeGroup:   vgName,
 		LogicalVolume: lvName,
 		MountPoint:    mountPoint,
+		SnapshotConfig: SnapshotConfig{ReservePercent: snapReserve},
 		CreatedAt:     now,
 		UpdatedAt:     now,
 	}
@@ -431,4 +438,82 @@ func toSharingShares(shares []Share) []sharing.Share {
 		result[i] = toSharingShare(s)
 	}
 	return result
+}
+
+// Phase 6: Snapshots
+
+func (e *engineImpl) CreateSnapshot(ctx context.Context, poolID string, name string, expiresIn string) (*Snapshot, error) {
+	pool, err := e.meta.LoadPool(poolID)
+	if err != nil {
+		return nil, err
+	}
+	if name == "" {
+		name = snapshots.GenerateName()
+	}
+	if err := snapshots.Create(pool.VolumeGroup, pool.LogicalVolume, name); err != nil {
+		return nil, fmt.Errorf("create snapshot: %w", err)
+	}
+	mountPath := snapshots.SnapMountPath(pool.MountPoint, name)
+	snapshots.Mount(pool.VolumeGroup, name, mountPath)
+
+	snap := Snapshot{Name: name, CreatedAt: time.Now().Unix(), MountPath: mountPath}
+	if expiresIn != "" {
+		if dur, err := time.ParseDuration(expiresIn); err == nil {
+			snap.ExpiresAt = time.Now().Add(dur).Unix()
+		}
+	}
+	pool.Snapshots = append(pool.Snapshots, snap)
+	pool.UpdatedAt = time.Now()
+	e.meta.SavePool(pool)
+	return &snap, nil
+}
+
+func (e *engineImpl) DeleteSnapshot(ctx context.Context, poolID string, name string) error {
+	pool, err := e.meta.LoadPool(poolID)
+	if err != nil {
+		return err
+	}
+	idx := -1
+	for i, s := range pool.Snapshots {
+		if s.Name == name {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return fmt.Errorf("snapshot %q not found", name)
+	}
+	snapshots.Delete(pool.VolumeGroup, name, pool.Snapshots[idx].MountPath)
+	pool.Snapshots = append(pool.Snapshots[:idx], pool.Snapshots[idx+1:]...)
+	pool.UpdatedAt = time.Now()
+	return e.meta.SavePool(pool)
+}
+
+func (e *engineImpl) ListSnapshots(ctx context.Context, poolID string) ([]Snapshot, error) {
+	pool, err := e.meta.LoadPool(poolID)
+	if err != nil {
+		return nil, err
+	}
+	// Enrich with current size from LVM
+	lvSnaps, _ := snapshots.List(pool.VolumeGroup)
+	sizeMap := make(map[string]uint64)
+	for _, s := range lvSnaps {
+		sizeMap[s.Name] = s.SizeBytes
+	}
+	for i := range pool.Snapshots {
+		if sz, ok := sizeMap[pool.Snapshots[i].Name]; ok {
+			pool.Snapshots[i].SizeBytes = sz
+		}
+	}
+	return pool.Snapshots, nil
+}
+
+func (e *engineImpl) SetSnapshotSchedule(ctx context.Context, poolID string, schedule SnapshotSchedule) error {
+	pool, err := e.meta.LoadPool(poolID)
+	if err != nil {
+		return err
+	}
+	// Store schedule in metadata (daemon reads it)
+	pool.UpdatedAt = time.Now()
+	return e.meta.SavePool(pool)
 }

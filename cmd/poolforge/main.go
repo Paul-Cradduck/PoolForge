@@ -6,11 +6,13 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/poolforge/poolforge/internal/api"
 	"github.com/poolforge/poolforge/internal/engine"
 	"github.com/poolforge/poolforge/internal/metadata"
 	"github.com/poolforge/poolforge/internal/monitoring"
+	"github.com/poolforge/poolforge/internal/replication"
 	"github.com/poolforge/poolforge/internal/safety"
 	"github.com/poolforge/poolforge/internal/sharing"
 	"github.com/poolforge/poolforge/internal/storage"
@@ -36,6 +38,7 @@ func main() {
 	var createDisks string
 	var createParity string
 	var createName string
+	var createSnapReserve int
 	createCmd := &cobra.Command{
 		Use:   "create",
 		Short: "Create a new storage pool",
@@ -46,7 +49,7 @@ func main() {
 			}
 			disks := strings.Split(createDisks, ",")
 			p, err := eng.CreatePool(context.Background(), engine.CreatePoolRequest{
-				Name: createName, Disks: disks, ParityMode: pm,
+				Name: createName, Disks: disks, ParityMode: pm, SnapshotReserve: createSnapReserve,
 			})
 			if err != nil {
 				return err
@@ -64,6 +67,7 @@ func main() {
 	createCmd.Flags().StringVar(&createDisks, "disks", "", "Comma-separated disk devices")
 	createCmd.Flags().StringVar(&createParity, "parity", "shr1", "Parity mode: shr1 or shr2")
 	createCmd.Flags().StringVar(&createName, "name", "", "Pool name")
+	createCmd.Flags().IntVar(&createSnapReserve, "snapshot-reserve", 10, "Snapshot reserve percent")
 	createCmd.MarkFlagRequired("disks")
 	createCmd.MarkFlagRequired("name")
 	pool.AddCommand(createCmd)
@@ -435,6 +439,122 @@ func main() {
 	userListCmd.Flags().StringVar(&userListPool, "pool", "", "Filter by pool name")
 	userCmd.AddCommand(userListCmd)
 
+	// snapshot commands
+	snapCmd := &cobra.Command{Use: "snapshot", Short: "Snapshot management"}
+	root.AddCommand(snapCmd)
+
+	var snapName, snapExpires string
+	snapCreateCmd := &cobra.Command{
+		Use: "create [pool-name]", Short: "Create a snapshot", Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			poolID, err := resolvePoolName(eng, args[0])
+			if err != nil {
+				return err
+			}
+			snap, err := eng.CreateSnapshot(context.Background(), poolID, snapName, snapExpires)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Snapshot %q created at %s\n", snap.Name, snap.MountPath)
+			return nil
+		},
+	}
+	snapCreateCmd.Flags().StringVar(&snapName, "name", "", "Snapshot name (auto-generated if empty)")
+	snapCreateCmd.Flags().StringVar(&snapExpires, "expires", "", "Expiry duration (e.g. 24h)")
+	snapCmd.AddCommand(snapCreateCmd)
+
+	snapCmd.AddCommand(&cobra.Command{
+		Use: "list [pool-name]", Short: "List snapshots", Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			poolID, err := resolvePoolName(eng, args[0])
+			if err != nil {
+				return err
+			}
+			snaps, err := eng.ListSnapshots(context.Background(), poolID)
+			if err != nil {
+				return err
+			}
+			if len(snaps) == 0 {
+				fmt.Println("No snapshots.")
+				return nil
+			}
+			fmt.Printf("%-30s %-12s %-20s\n", "NAME", "SIZE", "CREATED")
+			for _, s := range snaps {
+				fmt.Printf("%-30s %-12s %-20s\n", s.Name, formatBytes(s.SizeBytes),
+					time.Unix(s.CreatedAt, 0).Format("2006-01-02 15:04:05"))
+			}
+			return nil
+		},
+	})
+
+	var snapDeleteName string
+	snapDeleteCmd := &cobra.Command{
+		Use: "delete [pool-name]", Short: "Delete a snapshot", Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			poolID, err := resolvePoolName(eng, args[0])
+			if err != nil {
+				return err
+			}
+			return eng.DeleteSnapshot(context.Background(), poolID, snapDeleteName)
+		},
+	}
+	snapDeleteCmd.Flags().StringVar(&snapDeleteName, "name", "", "Snapshot name")
+	snapDeleteCmd.MarkFlagRequired("name")
+	snapCmd.AddCommand(snapDeleteCmd)
+
+	// pair commands
+	pairCmd := &cobra.Command{Use: "pair", Short: "Node pairing for replication"}
+	root.AddCommand(pairCmd)
+
+	pairCmd.AddCommand(&cobra.Command{
+		Use: "init", Short: "Generate a pairing code",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			pm := replication.NewPairingManager()
+			hostname, _ := os.Hostname()
+			code, err := pm.InitPairing(hostname, hostname+":8080")
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Pairing code: %s\n", code)
+			fmt.Println("Run on the remote node: poolforge pair join " + code)
+			return nil
+		},
+	})
+
+	var joinCode string
+	joinCmd := &cobra.Command{
+		Use: "join", Short: "Join a remote node using pairing code",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			pm := replication.NewPairingManager()
+			hostname, _ := os.Hostname()
+			if err := pm.JoinRemote(joinCode, hostname, hostname); err != nil {
+				return err
+			}
+			fmt.Println("Paired successfully")
+			return nil
+		},
+	}
+	joinCmd.Flags().StringVar(&joinCode, "code", "", "Pairing code (CODE@HOST:PORT)")
+	joinCmd.MarkFlagRequired("code")
+	pairCmd.AddCommand(joinCmd)
+
+	pairCmd.AddCommand(&cobra.Command{
+		Use: "list", Short: "List paired nodes",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			pm := replication.NewPairingManager()
+			nodes := pm.Nodes()
+			if len(nodes) == 0 {
+				fmt.Println("No paired nodes.")
+				return nil
+			}
+			fmt.Printf("%-16s %-20s %-20s\n", "ID", "NAME", "HOST")
+			for _, n := range nodes {
+				fmt.Printf("%-16s %-20s %-20s\n", n.ID, n.Name, n.Host)
+			}
+			return nil
+		},
+	})
+
 	// serve — web portal + safety daemon + monitoring
 	var serveAddr, serveUser, servePass, webhookURL string
 	serveCmd := &cobra.Command{
@@ -462,12 +582,18 @@ func main() {
 			// Share manager
 			shareMgr := sharing.NewShareManager()
 
+			// Pairing and sync managers
+			pairingMgr := replication.NewPairingManager()
+			syncMgr := replication.NewSyncManager(pairingMgr)
+
 			srv := api.NewWithAuth(eng, serveUser, servePass)
 			srv.SetAlerter(daemon.Alerter())
 			srv.SetLogs(daemon.Logs())
 			srv.SetDaemon(daemon)
 			srv.SetCollector(collector)
 			srv.SetShares(shareMgr)
+			srv.SetPairing(pairingMgr)
+			srv.SetSync(syncMgr)
 			fmt.Printf("PoolForge web portal: http://%s\n", serveAddr)
 			fmt.Println("Safety daemon: SMART monitoring, scrub scheduling, metadata backup")
 			fmt.Println("Monitoring: disk IO, network IO, client connections")

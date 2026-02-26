@@ -108,6 +108,7 @@ td { padding: 8px 12px; border-bottom: 1px solid var(--border); }
     <span style="flex:1"></span>
     <button id="tabPoolsBtn" class="primary" onclick="switchTab('pools')">Pools</button>
     <button id="tabMonitorBtn" onclick="switchTab('monitor')">📊 Monitoring</button>
+    <button id="tabSyncBtn" onclick="switchTab('sync')">🔄 Sync</button>
   </div>
   <div id="tabPools">
     <div id="pools"></div>
@@ -154,6 +155,27 @@ td { padding: 8px 12px; border-bottom: 1px solid var(--border); }
         <tr><th>User</th><th>IP</th><th>Share</th><th>Protocol</th><th>Duration</th></tr>
       </table>
       <div id="noClients" style="text-align:center;padding:16px;color:var(--muted);font-size:13px">No active connections</div>
+    </div>
+  </div>
+  <div id="tabSync" style="display:none">
+    <div class="card">
+      <h2>🔗 Paired Nodes <span style="flex:1"></span><button onclick="pairInit()">+ Pair New Node</button></h2>
+      <table id="pairedNodesTable"><tr><th>Name</th><th>Host</th><th>Paired</th><th></th></tr></table>
+      <div id="noPairedNodes" style="text-align:center;padding:16px;color:var(--muted);font-size:13px">No paired nodes</div>
+      <div id="pairingCode" style="display:none;margin-top:12px;padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:8px">
+        <div style="font-size:13px;color:var(--muted)">Pairing code (expires in 10 minutes):</div>
+        <div id="pairingCodeValue" style="font-size:24px;font-weight:700;font-family:monospace;margin:8px 0"></div>
+        <div style="font-size:12px;color:var(--muted)">Run on remote node: <code>poolforge pair join --code &lt;code&gt;</code></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>📋 Sync Jobs <span style="flex:1"></span><button onclick="showSyncJobModal()">+ Create Job</button></h2>
+      <table id="syncJobsTable"><tr><th>Name</th><th>Remote</th><th>Mode</th><th>Schedule</th><th>Last Run</th><th></th></tr></table>
+      <div id="noSyncJobs" style="text-align:center;padding:16px;color:var(--muted);font-size:13px">No sync jobs</div>
+    </div>
+    <div class="card">
+      <h2>📜 Recent Activity</h2>
+      <div id="syncHistory" style="font-size:12px;font-family:monospace"></div>
     </div>
   </div>
 </div>
@@ -232,6 +254,27 @@ td { padding: 8px 12px; border-bottom: 1px solid var(--border); }
     <div class="actions">
       <button onclick="closeModal('userModal')">Cancel</button>
       <button class="primary" onclick="submitUser()">Add User</button>
+    </div>
+  </div>
+</div>
+
+<!-- Sync Job Modal -->
+<div class="modal-overlay" id="syncJobModal">
+  <div class="modal">
+    <h3>Create Sync Job</h3>
+    <label>Job Name</label>
+    <input id="syncJobName" placeholder="docs-sync">
+    <label>Remote Node</label>
+    <select id="syncJobRemote"></select>
+    <label>Local Pool</label>
+    <select id="syncJobLocalPool"></select>
+    <label>Mode</label>
+    <select id="syncJobMode"><option value="push">Push</option><option value="pull">Pull</option><option value="bidirectional">Bidirectional</option></select>
+    <label>Schedule (e.g. 15m, 1h, empty for manual)</label>
+    <input id="syncJobSchedule" placeholder="1h">
+    <div class="actions">
+      <button onclick="closeModal('syncJobModal')">Cancel</button>
+      <button class="primary" onclick="submitSyncJob()">Create</button>
     </div>
   </div>
 </div>
@@ -408,6 +451,13 @@ function renderPool(summary, status) {
     <h3 style="font-size:13px;margin:12px 0 6px">Disks</h3>
     <table><tr><th>Device</th><th>Size</th><th>State</th><th>Arrays</th></tr>${diskRows}</table>
     ${sliceMapHTML}
+    <div style="margin-top:12px">
+      <h3 style="font-size:13px;margin-bottom:8px">📸 Snapshots
+        <span style="flex:1"></span>
+        <button onclick="createSnapshot('${pool.ID}')" style="font-size:11px;padding:4px 10px;margin-left:8px">+ Snapshot</button>
+      </h3>
+      <div id="snapshots-${pool.ID}" style="font-size:13px;color:var(--muted)">Loading...</div>
+    </div>
   </div>`;
 }
 
@@ -822,10 +872,13 @@ setInterval(autoWatchRebuilds, 3000);
 function switchTab(tab) {
   document.getElementById('tabPools').style.display = tab === 'pools' ? '' : 'none';
   document.getElementById('tabMonitor').style.display = tab === 'monitor' ? '' : 'none';
+  document.getElementById('tabSync').style.display = tab === 'sync' ? '' : 'none';
   document.getElementById('tabPoolsBtn').className = tab === 'pools' ? 'primary' : '';
   document.getElementById('tabMonitorBtn').className = tab === 'monitor' ? 'primary' : '';
+  document.getElementById('tabSyncBtn').className = tab === 'sync' ? 'primary' : '';
   if (tab === 'monitor') startMonitoringSSE();
   else stopMonitoringSSE();
+  if (tab === 'sync') refreshSync();
 }
 
 // --- Shares Panel ---
@@ -1068,6 +1121,207 @@ refreshUsers();
 setInterval(refreshShares, 15000);
 setInterval(refreshUsers, 15000);
 setInterval(() => { if (monitorSSE) { refreshClients(); refreshProtocolStatus(); } }, 5000);
+
+// --- Snapshots Panel ---
+async function refreshSnapshots() {
+  try {
+    const pools = await api('/pools');
+    for (const p of pools) {
+      const el = document.getElementById('snapshots-' + p.ID);
+      if (!el) continue;
+      const snaps = await api('/pools/' + p.ID + '/snapshots');
+      if (!snaps || snaps.length === 0) {
+        el.innerHTML = '<div style="color:var(--muted);font-size:13px;padding:4px 0">No snapshots</div>';
+        continue;
+      }
+      let html = '<table><tr><th>Name</th><th>Size</th><th>Created</th><th></th></tr>';
+      for (const s of snaps) {
+        const created = new Date(s.created_at * 1000).toLocaleString();
+        html += `<tr><td>${s.name}</td><td>${fmtBytes(s.size_bytes||0)}</td><td>${created}</td>
+          <td><button class="danger" onclick="deleteSnapshot('${p.ID}','${s.name}')" style="font-size:11px;padding:2px 8px">Delete</button></td></tr>`;
+      }
+      el.innerHTML = html + '</table>';
+    }
+  } catch(e) {}
+}
+
+async function createSnapshot(poolID) {
+  try {
+    const snap = await api('/pools/' + poolID + '/snapshots', { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' });
+    toast('Snapshot ' + (snap.name || '') + ' created');
+    refreshSnapshots();
+  } catch(e) { toast(e.message, true); }
+}
+
+async function deleteSnapshot(poolID, name) {
+  if (!confirm('Delete snapshot "' + name + '"?')) return;
+  try {
+    await api('/pools/' + poolID + '/snapshots/' + name, { method: 'DELETE' });
+    toast('Snapshot deleted');
+    refreshSnapshots();
+  } catch(e) { toast(e.message, true); }
+}
+
+setInterval(refreshSnapshots, 15000);
+setTimeout(refreshSnapshots, 2000);
+
+// --- Sync Tab ---
+async function refreshSync() {
+  await refreshPairedNodes();
+  await refreshSyncJobs();
+  await refreshSyncHistory();
+}
+
+async function refreshPairedNodes() {
+  try {
+    const nodes = await api('/pair/nodes');
+    const table = document.getElementById('pairedNodesTable');
+    const empty = document.getElementById('noPairedNodes');
+    if (!nodes || nodes.length === 0) {
+      table.innerHTML = '<tr><th>Name</th><th>Host</th><th>Paired</th><th></th></tr>';
+      empty.style.display = '';
+      return;
+    }
+    empty.style.display = 'none';
+    let rows = '<tr><th>Name</th><th>Host</th><th>Paired</th><th></th></tr>';
+    for (const n of nodes) {
+      const ago = timeAgo(n.paired_at);
+      rows += `<tr><td>${n.name}</td><td>${n.host}</td><td>${ago}</td>
+        <td><button class="danger" onclick="unpairNode('${n.id}')" style="font-size:11px;padding:2px 8px">Unpair</button></td></tr>`;
+    }
+    table.innerHTML = rows;
+  } catch(e) {}
+}
+
+async function pairInit() {
+  try {
+    const host = window.location.hostname + ':' + window.location.port;
+    const r = await api('/pair/init', { method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({name: host, host: host}) });
+    document.getElementById('pairingCodeValue').textContent = r.code;
+    document.getElementById('pairingCode').style.display = '';
+  } catch(e) { toast(e.message, true); }
+}
+
+async function unpairNode(id) {
+  if (!confirm('Unpair this node?')) return;
+  try {
+    await api('/pair/nodes/' + id, { method: 'DELETE' });
+    toast('Node unpaired');
+    refreshPairedNodes();
+  } catch(e) { toast(e.message, true); }
+}
+
+async function refreshSyncJobs() {
+  try {
+    const jobs = await api('/sync/jobs');
+    const table = document.getElementById('syncJobsTable');
+    const empty = document.getElementById('noSyncJobs');
+    if (!jobs || jobs.length === 0) {
+      table.innerHTML = '<tr><th>Name</th><th>Remote</th><th>Mode</th><th>Schedule</th><th>Last Run</th><th></th></tr>';
+      empty.style.display = '';
+      return;
+    }
+    empty.style.display = 'none';
+    let rows = '<tr><th>Name</th><th>Remote</th><th>Mode</th><th>Schedule</th><th>Last Run</th><th></th></tr>';
+    for (const j of jobs) {
+      const history = await api('/sync/jobs/' + j.id + '/history');
+      const last = history && history.length > 0 ? history[history.length-1] : null;
+      const lastStr = last ? (last.status === 'success' ? '✓' : '✗') + ' ' + timeAgo(last.finished_at) : '-';
+      rows += `<tr><td>${j.name}</td><td>${j.remote_node}</td><td>${j.mode}</td><td>${j.schedule || 'manual'}</td><td>${lastStr}</td>
+        <td>
+          <button onclick="runSyncJob('${j.id}')" style="font-size:11px;padding:2px 8px">▶ Run</button>
+          <button class="danger" onclick="deleteSyncJob('${j.id}')" style="font-size:11px;padding:2px 8px">Delete</button>
+        </td></tr>`;
+    }
+    table.innerHTML = rows;
+  } catch(e) {}
+}
+
+async function refreshSyncHistory() {
+  try {
+    const jobs = await api('/sync/jobs');
+    let allRuns = [];
+    for (const j of jobs) {
+      const history = await api('/sync/jobs/' + j.id + '/history');
+      if (history) allRuns.push(...history.map(r => ({...r, jobName: j.name, remoteName: j.remote_node})));
+    }
+    allRuns.sort((a,b) => (b.started_at||0) - (a.started_at||0));
+    const el = document.getElementById('syncHistory');
+    if (allRuns.length === 0) {
+      el.innerHTML = '<div style="color:var(--muted);padding:8px 0">No sync activity yet</div>';
+      return;
+    }
+    el.innerHTML = allRuns.slice(0, 20).map(r => {
+      const t = new Date(r.started_at * 1000).toLocaleTimeString();
+      const icon = r.status === 'success' ? '✓' : '✗';
+      const color = r.status === 'success' ? 'var(--green)' : 'var(--red)';
+      const dur = r.finished_at ? ((r.finished_at - r.started_at) + 's') : 'running';
+      return `<div style="padding:3px 0;border-bottom:1px solid var(--border)">
+        <span style="color:var(--muted)">${t}</span>
+        <span>${r.jobName}</span> → <span>${r.remoteName}</span>
+        <span style="color:${color}">${icon}</span>
+        ${r.files_changed ? r.files_changed + ' files' : ''}
+        ${r.bytes_sent ? fmtBytes(r.bytes_sent) : ''}
+        <span style="color:var(--muted)">${dur}</span>
+        ${r.error ? `<span style="color:var(--red)">${r.error}</span>` : ''}
+      </div>`;
+    }).join('');
+  } catch(e) {}
+}
+
+async function showSyncJobModal() {
+  const nodes = await api('/pair/nodes');
+  document.getElementById('syncJobRemote').innerHTML = nodes.map(n => `<option value="${n.id}">${n.name} (${n.host})</option>`).join('');
+  const pools = await api('/pools');
+  document.getElementById('syncJobLocalPool').innerHTML = pools.map(p => `<option value="${p.ID}">${p.Name}</option>`).join('');
+  document.getElementById('syncJobName').value = '';
+  document.getElementById('syncJobSchedule').value = '';
+  document.getElementById('syncJobModal').classList.add('active');
+}
+
+async function submitSyncJob() {
+  const job = {
+    name: document.getElementById('syncJobName').value.trim(),
+    remote_node: document.getElementById('syncJobRemote').value,
+    local_pool: document.getElementById('syncJobLocalPool').value,
+    mode: document.getElementById('syncJobMode').value,
+    schedule: document.getElementById('syncJobSchedule').value.trim(),
+  };
+  if (!job.name) return toast('Enter a job name', true);
+  try {
+    await api('/sync/jobs', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(job) });
+    toast('Sync job created');
+    closeModal('syncJobModal');
+    refreshSyncJobs();
+  } catch(e) { toast(e.message, true); }
+}
+
+async function runSyncJob(id) {
+  try {
+    const r = await api('/sync/jobs/' + id + '/run', { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' });
+    toast(r.status === 'success' ? 'Sync completed' : 'Sync failed: ' + (r.error||''), r.status !== 'success');
+    refreshSync();
+  } catch(e) { toast(e.message, true); }
+}
+
+async function deleteSyncJob(id) {
+  if (!confirm('Delete this sync job?')) return;
+  try {
+    await api('/sync/jobs/' + id, { method: 'DELETE' });
+    toast('Job deleted');
+    refreshSyncJobs();
+  } catch(e) { toast(e.message, true); }
+}
+
+function timeAgo(ts) {
+  if (!ts) return 'never';
+  const sec = Math.floor(Date.now()/1000 - ts);
+  if (sec < 60) return sec + 's ago';
+  if (sec < 3600) return Math.floor(sec/60) + 'm ago';
+  if (sec < 86400) return Math.floor(sec/3600) + 'h ago';
+  return Math.floor(sec/86400) + 'd ago';
+}
 </script>
 </body>
 </html>

@@ -32,20 +32,22 @@ type schema struct {
 }
 
 type poolRecord struct {
-	ID            string           `json:"id"`
-	Name          string           `json:"name"`
-	ParityMode    string           `json:"parity_mode"`
-	State         string           `json:"state"`
-	Disks         []diskRecord     `json:"disks"`
-	CapacityTiers []tierRecord     `json:"capacity_tiers"`
-	RAIDArrays    []arrayRecord    `json:"raid_arrays"`
-	VolumeGroup   string           `json:"volume_group"`
-	LogicalVolume string           `json:"logical_volume"`
-	MountPoint    string           `json:"mount_point"`
-	Shares        []engine.Share   `json:"shares,omitempty"`
-	Users         []engine.NASUser `json:"users,omitempty"`
-	CreatedAt     time.Time        `json:"created_at"`
-	UpdatedAt     time.Time        `json:"updated_at"`
+	ID             string                `json:"id"`
+	Name           string                `json:"name"`
+	ParityMode     string                `json:"parity_mode"`
+	State          string                `json:"state"`
+	Disks          []diskRecord          `json:"disks"`
+	CapacityTiers  []tierRecord          `json:"capacity_tiers"`
+	RAIDArrays     []arrayRecord         `json:"raid_arrays"`
+	VolumeGroup    string                `json:"volume_group"`
+	LogicalVolume  string                `json:"logical_volume"`
+	MountPoint     string                `json:"mount_point"`
+	Shares         []engine.Share        `json:"shares,omitempty"`
+	Users          []engine.NASUser      `json:"users,omitempty"`
+	SnapshotConfig engine.SnapshotConfig `json:"snapshot_config"`
+	Snapshots      []engine.Snapshot     `json:"snapshots,omitempty"`
+	CreatedAt      time.Time             `json:"created_at"`
+	UpdatedAt      time.Time             `json:"updated_at"`
 }
 
 type diskRecord struct {
@@ -181,6 +183,7 @@ func toRecord(p *engine.Pool) *poolRecord {
 		State: string(p.State), VolumeGroup: p.VolumeGroup,
 		LogicalVolume: p.LogicalVolume, MountPoint: p.MountPoint,
 		Shares: p.Shares, Users: p.Users,
+		SnapshotConfig: p.SnapshotConfig, Snapshots: p.Snapshots,
 		CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,
 	}
 	for _, d := range p.Disks {
@@ -218,6 +221,7 @@ func fromRecord(rec *poolRecord) *engine.Pool {
 		State: engine.PoolState(rec.State), VolumeGroup: rec.VolumeGroup,
 		LogicalVolume: rec.LogicalVolume, MountPoint: rec.MountPoint,
 		Shares: rec.Shares, Users: rec.Users,
+		SnapshotConfig: rec.SnapshotConfig, Snapshots: rec.Snapshots,
 		CreatedAt: rec.CreatedAt, UpdatedAt: rec.UpdatedAt,
 	}
 	for _, dr := range rec.Disks {

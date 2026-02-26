@@ -33,6 +33,12 @@ type EngineService interface {
 	// Phase 5: Users
 	CreateUser(ctx context.Context, poolID string, name, password string, globalAccess bool) (*NASUser, error)
 	DeleteUser(ctx context.Context, poolID string, name string) error
+
+	// Phase 6: Snapshots
+	CreateSnapshot(ctx context.Context, poolID string, name string, expiresIn string) (*Snapshot, error)
+	DeleteSnapshot(ctx context.Context, poolID string, name string) error
+	ListSnapshots(ctx context.Context, poolID string) ([]Snapshot, error)
+	SetSnapshotSchedule(ctx context.Context, poolID string, schedule SnapshotSchedule) error
 }
 
 // MetadataStore defines the persistence interface.

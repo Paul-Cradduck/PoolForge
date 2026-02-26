@@ -12,6 +12,7 @@ import (
 
 	"github.com/poolforge/poolforge/internal/engine"
 	"github.com/poolforge/poolforge/internal/monitoring"
+	"github.com/poolforge/poolforge/internal/replication"
 	"github.com/poolforge/poolforge/internal/safety"
 	"github.com/poolforge/poolforge/internal/sharing"
 )
@@ -29,13 +30,17 @@ type Server struct {
 	daemon    *safety.Daemon
 	collector *monitoring.Collector
 	shares    *sharing.ShareManager
+	pairing   *replication.PairingManager
+	sync      *replication.SyncManager
 }
 
-func (s *Server) SetAlerter(a *safety.Alerter)        { s.alerter = a }
-func (s *Server) SetLogs(l *safety.LogBuffer)          { s.logs = l }
-func (s *Server) SetDaemon(d *safety.Daemon)           { s.daemon = d }
-func (s *Server) SetCollector(c *monitoring.Collector)  { s.collector = c }
-func (s *Server) SetShares(sm *sharing.ShareManager)    { s.shares = sm }
+func (s *Server) SetAlerter(a *safety.Alerter)              { s.alerter = a }
+func (s *Server) SetLogs(l *safety.LogBuffer)                { s.logs = l }
+func (s *Server) SetDaemon(d *safety.Daemon)                 { s.daemon = d }
+func (s *Server) SetCollector(c *monitoring.Collector)        { s.collector = c }
+func (s *Server) SetShares(sm *sharing.ShareManager)          { s.shares = sm }
+func (s *Server) SetPairing(pm *replication.PairingManager)   { s.pairing = pm }
+func (s *Server) SetSync(sm *replication.SyncManager)         { s.sync = sm }
 
 func New(eng engine.EngineService) *Server {
 	return NewWithAuth(eng, "", "")
@@ -76,6 +81,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/monitoring/history", s.handleMonitoringHistory)
 	s.mux.HandleFunc("/api/monitoring/clients", s.handleMonitoringClients)
 	s.mux.HandleFunc("/api/monitoring/status", s.handleProtocolStatus)
+	s.mux.HandleFunc("/api/pair/init", s.handlePairInit)
+	s.mux.HandleFunc("/api/pair/exchange", s.handlePairExchange)
+	s.mux.HandleFunc("/api/pair/nodes", s.handlePairNodes)
+	s.mux.HandleFunc("/api/pair/nodes/", s.handlePairNodeDelete)
+	s.mux.HandleFunc("/api/sync/jobs", s.handleSyncJobs)
+	s.mux.HandleFunc("/api/sync/jobs/", s.handleSyncJob)
 
 	sub, _ := fs.Sub(staticFS, "static")
 	s.mux.Handle("/", http.FileServer(http.FS(sub)))
@@ -95,9 +106,10 @@ func (s *Server) handlePools(w http.ResponseWriter, r *http.Request) {
 		jsonResp(w, pools)
 	case http.MethodPost:
 		var req struct {
-			Name       string   `json:"name"`
-			Disks      []string `json:"disks"`
-			ParityMode string   `json:"parityMode"`
+			Name            string   `json:"name"`
+			Disks           []string `json:"disks"`
+			ParityMode      string   `json:"parityMode"`
+			SnapshotReserve int      `json:"snapshotReserve"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			httpError(w, err, http.StatusBadRequest)
@@ -109,7 +121,7 @@ func (s *Server) handlePools(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		pool, err := s.engine.CreatePool(r.Context(), engine.CreatePoolRequest{
-			Name: req.Name, Disks: req.Disks, ParityMode: pm,
+			Name: req.Name, Disks: req.Disks, ParityMode: pm, SnapshotReserve: req.SnapshotReserve,
 		})
 		if err != nil {
 			s.logError("create pool %q: %v", req.Name, err)
@@ -146,6 +158,8 @@ func (s *Server) handlePool(w http.ResponseWriter, r *http.Request) {
 		s.handleRebuildSSE(w, r, poolID)
 	case "shares":
 		s.handleShares(w, r, poolID, parts)
+	case "snapshots":
+		s.handleSnapshots(w, r, poolID, parts)
 	default:
 		w.WriteHeader(http.StatusNotFound)
 	}
@@ -966,4 +980,217 @@ func (s *Server) handleProtocolStatus(w http.ResponseWriter, r *http.Request) {
 		status["nfs"] = s.shares.NFSRunning()
 	}
 	jsonResp(w, status)
+}
+
+// --- Phase 6: Snapshots ---
+
+func (s *Server) handleSnapshots(w http.ResponseWriter, r *http.Request, poolID string, parts []string) {
+	snapName := ""
+	if len(parts) > 2 {
+		snapName = parts[2]
+	}
+	switch r.Method {
+	case http.MethodGet:
+		snaps, err := s.engine.ListSnapshots(r.Context(), poolID)
+		if err != nil {
+			httpError(w, err, http.StatusInternalServerError)
+			return
+		}
+		if snaps == nil {
+			snaps = []engine.Snapshot{}
+		}
+		jsonResp(w, snaps)
+	case http.MethodPost:
+		if snapName == "schedule" {
+			var sched engine.SnapshotSchedule
+			if err := json.NewDecoder(r.Body).Decode(&sched); err != nil {
+				httpError(w, err, http.StatusBadRequest)
+				return
+			}
+			if err := s.engine.SetSnapshotSchedule(r.Context(), poolID, sched); err != nil {
+				httpError(w, err, http.StatusInternalServerError)
+				return
+			}
+			jsonResp(w, map[string]string{"status": "updated"})
+			return
+		}
+		var req struct {
+			Name    string `json:"name"`
+			Expires string `json:"expires"`
+		}
+		json.NewDecoder(r.Body).Decode(&req)
+		snap, err := s.engine.CreateSnapshot(r.Context(), poolID, req.Name, req.Expires)
+		if err != nil {
+			s.logError("create snapshot: %v", err)
+			httpError(w, err, http.StatusInternalServerError)
+			return
+		}
+		s.logInfo("snapshot %q created", snap.Name)
+		jsonResp(w, snap)
+	case http.MethodDelete:
+		if snapName == "" {
+			httpError(w, fmt.Errorf("missing snapshot name"), http.StatusBadRequest)
+			return
+		}
+		if err := s.engine.DeleteSnapshot(r.Context(), poolID, snapName); err != nil {
+			httpError(w, err, http.StatusInternalServerError)
+			return
+		}
+		s.logInfo("snapshot %q deleted", snapName)
+		jsonResp(w, map[string]string{"status": "deleted"})
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
+// --- Phase 6: Pairing ---
+
+func (s *Server) handlePairInit(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost || s.pairing == nil {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		Name string `json:"name"`
+		Host string `json:"host"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+	code, err := s.pairing.InitPairing(req.Name, req.Host)
+	if err != nil {
+		httpError(w, err, http.StatusInternalServerError)
+		return
+	}
+	jsonResp(w, map[string]string{"code": code})
+}
+
+func (s *Server) handlePairExchange(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost || s.pairing == nil {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		Code      string `json:"code"`
+		Name      string `json:"name"`
+		Host      string `json:"host"`
+		PublicKey string `json:"public_key"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpError(w, err, http.StatusBadRequest)
+		return
+	}
+	pubKey, err := s.pairing.Exchange(req.Code, req.Name, req.Host, req.PublicKey)
+	if err != nil {
+		httpError(w, err, http.StatusBadRequest)
+		return
+	}
+	host := r.Host
+	if idx := strings.Index(host, ":"); idx > 0 {
+		host = host[:idx]
+	}
+	jsonResp(w, map[string]string{"public_key": pubKey, "name": host, "host": host})
+}
+
+func (s *Server) handlePairNodes(w http.ResponseWriter, r *http.Request) {
+	if s.pairing == nil {
+		jsonResp(w, []engine.PairedNode{})
+		return
+	}
+	nodes := s.pairing.Nodes()
+	if nodes == nil {
+		nodes = []engine.PairedNode{}
+	}
+	jsonResp(w, nodes)
+}
+
+func (s *Server) handlePairNodeDelete(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete || s.pairing == nil {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	id := strings.TrimPrefix(r.URL.Path, "/api/pair/nodes/")
+	if err := s.pairing.RemoveNode(id); err != nil {
+		httpError(w, err, http.StatusNotFound)
+		return
+	}
+	jsonResp(w, map[string]string{"status": "unpaired"})
+}
+
+// --- Phase 6: Sync ---
+
+func (s *Server) handleSyncJobs(w http.ResponseWriter, r *http.Request) {
+	if s.sync == nil {
+		jsonResp(w, []engine.SyncJob{})
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		jobs := s.sync.Jobs()
+		if jobs == nil {
+			jobs = []engine.SyncJob{}
+		}
+		jsonResp(w, jobs)
+	case http.MethodPost:
+		var job engine.SyncJob
+		if err := json.NewDecoder(r.Body).Decode(&job); err != nil {
+			httpError(w, err, http.StatusBadRequest)
+			return
+		}
+		if err := s.sync.CreateJob(job); err != nil {
+			httpError(w, err, http.StatusInternalServerError)
+			return
+		}
+		s.logInfo("sync job %q created", job.Name)
+		jsonResp(w, map[string]string{"status": "created"})
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) handleSyncJob(w http.ResponseWriter, r *http.Request) {
+	if s.sync == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		return
+	}
+	path := strings.TrimPrefix(r.URL.Path, "/api/sync/jobs/")
+	parts := strings.SplitN(path, "/", 2)
+	jobID := parts[0]
+	action := ""
+	if len(parts) > 1 {
+		action = parts[1]
+	}
+
+	switch {
+	case action == "run" && r.Method == http.MethodPost:
+		var req struct {
+			PoolMount string `json:"pool_mount"`
+		}
+		json.NewDecoder(r.Body).Decode(&req)
+		run := s.sync.RunJob(jobID, req.PoolMount)
+		jsonResp(w, run)
+	case action == "history" && r.Method == http.MethodGet:
+		history := s.sync.History(jobID)
+		if history == nil {
+			history = []engine.SyncRun{}
+		}
+		jsonResp(w, history)
+	case action == "" && r.Method == http.MethodPut:
+		var job engine.SyncJob
+		if err := json.NewDecoder(r.Body).Decode(&job); err != nil {
+			httpError(w, err, http.StatusBadRequest)
+			return
+		}
+		if err := s.sync.UpdateJob(jobID, job); err != nil {
+			httpError(w, err, http.StatusInternalServerError)
+			return
+		}
+		jsonResp(w, map[string]string{"status": "updated"})
+	case action == "" && r.Method == http.MethodDelete:
+		if err := s.sync.DeleteJob(jobID); err != nil {
+			httpError(w, err, http.StatusNotFound)
+			return
+		}
+		jsonResp(w, map[string]string{"status": "deleted"})
+	default:
+		w.WriteHeader(http.StatusNotFound)
+	}
 }

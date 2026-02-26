@@ -56,20 +56,22 @@ const (
 )
 
 type Pool struct {
-	ID            string
-	Name          string
-	ParityMode    ParityMode
-	State         PoolState
-	Disks         []DiskInfo
-	CapacityTiers []CapacityTier
-	RAIDArrays    []RAIDArray
-	VolumeGroup   string
-	LogicalVolume string
-	MountPoint    string
-	Shares        []Share
-	Users         []NASUser
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	ID             string
+	Name           string
+	ParityMode     ParityMode
+	State          PoolState
+	Disks          []DiskInfo
+	CapacityTiers  []CapacityTier
+	RAIDArrays     []RAIDArray
+	VolumeGroup    string
+	LogicalVolume  string
+	MountPoint     string
+	Shares         []Share
+	Users          []NASUser
+	SnapshotConfig SnapshotConfig
+	Snapshots      []Snapshot
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
 type Share struct {
@@ -120,6 +122,60 @@ type MetricsSnapshot struct {
 	NetIO     []NetIOStats  `json:"net_io"`
 }
 
+// Snapshot types
+
+type SnapshotConfig struct {
+	ReservePercent int `json:"reserve_percent"`
+}
+
+type Snapshot struct {
+	Name      string `json:"name"`
+	CreatedAt int64  `json:"created_at"`
+	ExpiresAt int64  `json:"expires_at,omitempty"`
+	SizeBytes uint64 `json:"size_bytes"`
+	MountPath string `json:"mount_path,omitempty"`
+}
+
+type SnapshotSchedule struct {
+	Interval string `json:"interval"`
+	MaxAge   string `json:"max_age"`
+	MaxCount int    `json:"max_count"`
+}
+
+// Replication types
+
+type PairedNode struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Host      string `json:"host"`
+	Port      int    `json:"port"`
+	PairedAt  int64  `json:"paired_at"`
+	PublicKey string `json:"public_key"`
+}
+
+type SyncJob struct {
+	ID         string   `json:"id"`
+	Name       string   `json:"name"`
+	RemoteNode string   `json:"remote_node"`
+	LocalPool  string   `json:"local_pool"`
+	RemotePool string   `json:"remote_pool"`
+	Shares     []string `json:"shares,omitempty"`
+	Mode       string   `json:"mode"`
+	Schedule   string   `json:"schedule,omitempty"`
+	Enabled    bool     `json:"enabled"`
+}
+
+type SyncRun struct {
+	JobID        string `json:"job_id"`
+	StartedAt    int64  `json:"started_at"`
+	FinishedAt   int64  `json:"finished_at,omitempty"`
+	BytesSent    uint64 `json:"bytes_sent"`
+	BytesRecv    uint64 `json:"bytes_recv"`
+	FilesChanged int    `json:"files_changed"`
+	Status       string `json:"status"`
+	Error        string `json:"error,omitempty"`
+}
+
 type DiskInfo struct {
 	Device        string
 	CapacityBytes uint64
@@ -152,9 +208,10 @@ type RAIDArray struct {
 }
 
 type CreatePoolRequest struct {
-	Name       string
-	Disks      []string
-	ParityMode ParityMode
+	Name            string
+	Disks           []string
+	ParityMode      ParityMode
+	SnapshotReserve int // percent, 0 = default 10
 }
 
 type PoolSummary struct {
