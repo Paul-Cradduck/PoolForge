@@ -126,11 +126,11 @@ func (sm *SyncManager) RunJob(jobID string, poolMount string) *engine.SyncRun {
 		recv, files, err := rsyncExec(sshCmd, remoteBase, localBase)
 		totalRecv, totalFiles, lastErr = recv, files, err
 	case "bidirectional":
-		recv, f1, err := rsyncExec(sshCmd+" --update", remoteBase, localBase)
+		recv, f1, err := rsyncExec(sshCmd, remoteBase, localBase, "--update")
 		if err != nil {
 			lastErr = err
 		}
-		sent, f2, err := rsyncExec(sshCmd+" --update", localBase, remoteBase)
+		sent, f2, err := rsyncExec(sshCmd, localBase, remoteBase, "--update")
 		if err != nil {
 			lastErr = err
 		}
@@ -184,8 +184,10 @@ func (sm *SyncManager) RunScheduled(poolMounts map[string]string) {
 	}
 }
 
-func rsyncExec(sshCmd, src, dst string) (uint64, int, error) {
-	args := []string{"-avz", "--delete", "-e", sshCmd, src, dst}
+func rsyncExec(sshCmd, src, dst string, extraArgs ...string) (uint64, int, error) {
+	args := []string{"-avz", "--delete", "-e", sshCmd}
+	args = append(args, extraArgs...)
+	args = append(args, src, dst)
 	out, err := exec.Command("rsync", args...).CombinedOutput()
 	if err != nil {
 		return 0, 0, fmt.Errorf("rsync: %s: %w", strings.TrimSpace(string(out)), err)
