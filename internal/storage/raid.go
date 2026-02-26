@@ -2,6 +2,7 @@ package storage
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -100,4 +101,74 @@ func (r *raidManager) StopArray(device string) error {
 		return fmt.Errorf("mdadm stop %s: %w\n%s", device, err, out)
 	}
 	return nil
+}
+
+func (r *raidManager) AddMember(device string, member string) error {
+	exec.Command("wipefs", "-af", member).Run()
+	if out, err := exec.Command("mdadm", device, "--add", member).CombinedOutput(); err != nil {
+		return fmt.Errorf("mdadm add %s to %s: %w\n%s", member, device, err, out)
+	}
+	return nil
+}
+
+func (r *raidManager) RemoveMember(device string, member string) error {
+	exec.Command("mdadm", device, "--fail", member).Run()
+	if out, err := exec.Command("mdadm", device, "--remove", member).CombinedOutput(); err != nil {
+		return fmt.Errorf("mdadm remove %s from %s: %w\n%s", member, device, err, out)
+	}
+	return nil
+}
+
+func (r *raidManager) ReshapeArray(device string, newCount int, newLevel int) error {
+	args := []string{
+		"--grow", device,
+		"--raid-devices", strconv.Itoa(newCount),
+		"--level", strconv.Itoa(newLevel),
+	}
+	if out, err := exec.Command("mdadm", args...).CombinedOutput(); err != nil {
+		return fmt.Errorf("mdadm reshape %s: %w\n%s", device, err, out)
+	}
+	return nil
+}
+
+func (r *raidManager) GetSyncStatus(device string) (*SyncStatus, error) {
+	out, err := os.ReadFile("/proc/mdstat")
+	if err != nil {
+		return nil, err
+	}
+	// Find the device in mdstat
+	devName := strings.TrimPrefix(device, "/dev/")
+	lines := strings.Split(string(out), "\n")
+	for i, line := range lines {
+		if !strings.HasPrefix(line, devName+" ") {
+			continue
+		}
+		// Check next lines for recovery/reshape info
+		for j := i + 1; j < len(lines) && j <= i+3; j++ {
+			l := strings.TrimSpace(lines[j])
+			if strings.Contains(l, "recovery") || strings.Contains(l, "reshape") || strings.Contains(l, "resync") {
+				status := &SyncStatus{InSync: false}
+				if strings.Contains(l, "recovery") {
+					status.Action = "rebuild"
+				} else if strings.Contains(l, "reshape") {
+					status.Action = "reshape"
+				} else {
+					status.Action = "resync"
+				}
+				// Parse percentage
+				re := regexp.MustCompile(`(\d+\.\d+)%`)
+				if m := re.FindStringSubmatch(l); len(m) > 1 {
+					status.PercentComplete, _ = strconv.ParseFloat(m[1], 64)
+				}
+				// Parse ETA
+				etaRe := regexp.MustCompile(`finish=(\S+)`)
+				if m := etaRe.FindStringSubmatch(l); len(m) > 1 {
+					status.EstimatedFinish = m[1]
+				}
+				return status, nil
+			}
+		}
+		return &SyncStatus{InSync: true}, nil
+	}
+	return nil, fmt.Errorf("device %s not found in /proc/mdstat", device)
 }

@@ -6,6 +6,8 @@ type DiskManager interface {
 	CreateGPTPartitionTable(device string) error
 	CreatePartition(device string, start, size uint64) (*Partition, error)
 	ListPartitions(device string) ([]Partition, error)
+	WipePartitionTable(device string) error
+	HasExistingData(device string) (bool, error)
 }
 
 type DiskInfoResult struct {
@@ -26,6 +28,17 @@ type RAIDManager interface {
 	GetArrayDetail(device string) (*RAIDArrayDetail, error)
 	AssembleArray(device string, members []string) error
 	StopArray(device string) error
+	AddMember(device string, member string) error
+	RemoveMember(device string, member string) error
+	ReshapeArray(device string, newCount int, newLevel int) error
+	GetSyncStatus(device string) (*SyncStatus, error)
+}
+
+type SyncStatus struct {
+	InSync          bool
+	Action          string  // "rebuild", "reshape", "check", ""
+	PercentComplete float64
+	EstimatedFinish string
 }
 
 type RAIDCreateOpts struct {
@@ -61,6 +74,11 @@ type LVMManager interface {
 	CreateVolumeGroup(name string, pvDevices []string) error
 	CreateLogicalVolume(vgName string, lvName string, sizePercent int) error
 	GetVolumeGroupInfo(name string) (*VGInfo, error)
+	ExtendVolumeGroup(name string, pvDevice string) error
+	ExtendLogicalVolume(lvPath string) error
+	RemoveLogicalVolume(lvPath string) error
+	RemoveVolumeGroup(name string) error
+	RemovePhysicalVolume(device string) error
 }
 
 type VGInfo struct {
@@ -77,6 +95,7 @@ type FilesystemManager interface {
 	MountFilesystem(device string, mountPoint string) error
 	UnmountFilesystem(mountPoint string) error
 	GetUsage(mountPoint string) (*FSUsage, error)
+	ResizeFilesystem(device string) error
 }
 
 type FSUsage struct {

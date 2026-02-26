@@ -56,3 +56,38 @@ func (l *lvmManager) GetVolumeGroupInfo(name string) (*VGInfo, error) {
 		LVCount:   lvCount,
 	}, nil
 }
+
+func (l *lvmManager) ExtendVolumeGroup(name string, pvDevice string) error {
+	if out, err := exec.Command("vgextend", name, pvDevice).CombinedOutput(); err != nil {
+		return fmt.Errorf("vgextend %s: %w\n%s", name, err, out)
+	}
+	return nil
+}
+
+func (l *lvmManager) ExtendLogicalVolume(lvPath string) error {
+	if out, err := exec.Command("lvextend", "-l", "+100%FREE", lvPath).CombinedOutput(); err != nil {
+		return fmt.Errorf("lvextend %s: %w\n%s", lvPath, err, out)
+	}
+	return nil
+}
+
+func (l *lvmManager) RemoveLogicalVolume(lvPath string) error {
+	if out, err := exec.Command("lvremove", "-f", lvPath).CombinedOutput(); err != nil {
+		return fmt.Errorf("lvremove %s: %w\n%s", lvPath, err, out)
+	}
+	return nil
+}
+
+func (l *lvmManager) RemoveVolumeGroup(name string) error {
+	if out, err := exec.Command("vgremove", "-f", name).CombinedOutput(); err != nil {
+		return fmt.Errorf("vgremove %s: %w\n%s", name, err, out)
+	}
+	return nil
+}
+
+func (l *lvmManager) RemovePhysicalVolume(device string) error {
+	if out, err := exec.Command("pvremove", "-ff", "-y", device).CombinedOutput(); err != nil {
+		return fmt.Errorf("pvremove %s: %w\n%s", device, err, out)
+	}
+	return nil
+}

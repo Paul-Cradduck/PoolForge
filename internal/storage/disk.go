@@ -106,3 +106,22 @@ func partitionDevice(device string, num int) string {
 	}
 	return fmt.Sprintf("%s%d", device, num)
 }
+
+func (d *diskManager) WipePartitionTable(device string) error {
+	exec.Command("wipefs", "-af", device).Run()
+	if out, err := exec.Command("sgdisk", "--zap-all", device).CombinedOutput(); err != nil {
+		return fmt.Errorf("sgdisk zap %s: %w\n%s", device, err, out)
+	}
+	exec.Command("partprobe", device).Run()
+	exec.Command("udevadm", "settle").Run()
+	return nil
+}
+
+func (d *diskManager) HasExistingData(device string) (bool, error) {
+	out, err := exec.Command("blkid", "-p", device).CombinedOutput()
+	if err != nil {
+		// Exit code 2 = no signatures found
+		return false, nil
+	}
+	return len(strings.TrimSpace(string(out))) > 0, nil
+}

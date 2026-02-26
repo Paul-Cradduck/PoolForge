@@ -74,6 +74,7 @@ type DiskInfo struct {
 	CapacityBytes uint64
 	State         DiskState
 	Slices        []SliceInfo
+	FailedAt      *time.Time
 }
 
 type SliceInfo struct {
@@ -133,4 +134,37 @@ type DiskStatusInfo struct {
 	Device             string
 	State              DiskState
 	ContributingArrays []string
+}
+
+type RebuildProgress struct {
+	ArrayDevice     string
+	TierIndex       int
+	State           RebuildState
+	PercentComplete float64
+	TargetDisk      string
+	StartedAt       time.Time
+}
+
+type RebuildState string
+
+const (
+	RebuildInProgress RebuildState = "rebuilding"
+	RebuildComplete   RebuildState = "complete"
+	RebuildFailed     RebuildState = "failed"
+)
+
+type DowngradeReport struct {
+	Safe          bool
+	ArrayChanges  []ArrayChange
+	CapacityLoss  uint64
+	TiersRemoved  []int
+}
+
+type ArrayChange struct {
+	Device       string
+	OldLevel     int
+	NewLevel     int
+	OldMembers   int
+	NewMembers   int
+	Destroyed    bool
 }

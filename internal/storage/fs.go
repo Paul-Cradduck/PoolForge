@@ -66,3 +66,10 @@ func (f *fsManager) getUsageDF(mountPoint string) (*FSUsage, error) {
 	free, _ := strconv.ParseUint(fields[2], 10, 64)
 	return &FSUsage{TotalBytes: total, UsedBytes: used, FreeBytes: free}, nil
 }
+
+func (f *fsManager) ResizeFilesystem(device string) error {
+	if out, err := exec.Command("resize2fs", device).CombinedOutput(); err != nil {
+		return fmt.Errorf("resize2fs %s: %w\n%s", device, err, out)
+	}
+	return nil
+}

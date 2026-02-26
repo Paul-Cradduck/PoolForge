@@ -129,9 +129,118 @@ func main() {
 		},
 	})
 
+	// pool add-disk
+	var addDiskDev string
+	addDiskCmd := &cobra.Command{
+		Use:   "add-disk [pool-name]",
+		Short: "Add a disk to an existing pool",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			poolID, err := resolvePoolName(eng, args[0])
+			if err != nil {
+				return err
+			}
+			return eng.AddDisk(context.Background(), poolID, addDiskDev)
+		},
+	}
+	addDiskCmd.Flags().StringVar(&addDiskDev, "disk", "", "Disk device to add")
+	addDiskCmd.MarkFlagRequired("disk")
+	pool.AddCommand(addDiskCmd)
+
+	// pool replace-disk
+	var replaceOld, replaceNew string
+	replaceDiskCmd := &cobra.Command{
+		Use:   "replace-disk [pool-name]",
+		Short: "Replace a failed disk",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			poolID, err := resolvePoolName(eng, args[0])
+			if err != nil {
+				return err
+			}
+			return eng.ReplaceDisk(context.Background(), poolID, replaceOld, replaceNew)
+		},
+	}
+	replaceDiskCmd.Flags().StringVar(&replaceOld, "old", "", "Failed disk device")
+	replaceDiskCmd.Flags().StringVar(&replaceNew, "new", "", "Replacement disk device")
+	replaceDiskCmd.MarkFlagRequired("old")
+	replaceDiskCmd.MarkFlagRequired("new")
+	pool.AddCommand(replaceDiskCmd)
+
+	// pool remove-disk
+	var removeDiskDev string
+	removeDiskCmd := &cobra.Command{
+		Use:   "remove-disk [pool-name]",
+		Short: "Remove a disk from a pool",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			poolID, err := resolvePoolName(eng, args[0])
+			if err != nil {
+				return err
+			}
+			return eng.RemoveDisk(context.Background(), poolID, removeDiskDev)
+		},
+	}
+	removeDiskCmd.Flags().StringVar(&removeDiskDev, "disk", "", "Disk device to remove")
+	removeDiskCmd.MarkFlagRequired("disk")
+	pool.AddCommand(removeDiskCmd)
+
+	// pool delete
+	pool.AddCommand(&cobra.Command{
+		Use:   "delete [pool-name]",
+		Short: "Delete a pool and destroy all data",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			poolID, err := resolvePoolName(eng, args[0])
+			if err != nil {
+				return err
+			}
+			if err := eng.DeletePool(context.Background(), poolID); err != nil {
+				return err
+			}
+			fmt.Printf("Pool %q deleted.\n", args[0])
+			return nil
+		},
+	})
+
+	// pool fail-disk (simulate failure for testing)
+	var failDiskDev string
+	failDiskCmd := &cobra.Command{
+		Use:   "fail-disk [pool-name]",
+		Short: "Mark a disk as failed (for testing)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			poolID, err := resolvePoolName(eng, args[0])
+			if err != nil {
+				return err
+			}
+			if err := eng.HandleDiskFailure(context.Background(), poolID, failDiskDev); err != nil {
+				return err
+			}
+			fmt.Printf("Disk %s marked as failed in pool %q\n", failDiskDev, args[0])
+			return nil
+		},
+	}
+	failDiskCmd.Flags().StringVar(&failDiskDev, "disk", "", "Disk device to mark failed")
+	failDiskCmd.MarkFlagRequired("disk")
+	pool.AddCommand(failDiskCmd)
+
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
 	}
+}
+
+func resolvePoolName(eng engine.EngineService, name string) (string, error) {
+	pools, err := eng.ListPools(context.Background())
+	if err != nil {
+		return "", err
+	}
+	for _, p := range pools {
+		if p.Name == name {
+			return p.ID, nil
+		}
+	}
+	return "", fmt.Errorf("pool %q not found", name)
 }
 
 func formatBytes(b uint64) string {

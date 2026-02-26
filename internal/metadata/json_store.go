@@ -51,6 +51,7 @@ type diskRecord struct {
 	CapacityBytes uint64        `json:"capacity_bytes"`
 	State         string        `json:"state"`
 	Slices        []sliceRecord `json:"slices"`
+	FailedAt      *time.Time    `json:"failed_at,omitempty"`
 }
 
 type sliceRecord struct {
@@ -123,6 +124,18 @@ func (s *JSONStore) ListPools() ([]engine.PoolSummary, error) {
 	return summaries, nil
 }
 
+func (s *JSONStore) DeletePool(poolID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	data, err := s.load()
+	if err != nil {
+		return err
+	}
+	delete(data.Pools, poolID)
+	return s.save(data)
+}
+
 func (s *JSONStore) load() (*schema, error) {
 	raw, err := os.ReadFile(s.path)
 	if err != nil {
@@ -168,7 +181,7 @@ func toRecord(p *engine.Pool) *poolRecord {
 		CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,
 	}
 	for _, d := range p.Disks {
-		dr := diskRecord{Device: d.Device, CapacityBytes: d.CapacityBytes, State: string(d.State)}
+		dr := diskRecord{Device: d.Device, CapacityBytes: d.CapacityBytes, State: string(d.State), FailedAt: d.FailedAt}
 		for _, sl := range d.Slices {
 			dr.Slices = append(dr.Slices, sliceRecord{
 				TierIndex: sl.TierIndex, PartitionNumber: sl.PartitionNumber,
@@ -204,7 +217,7 @@ func fromRecord(rec *poolRecord) *engine.Pool {
 		CreatedAt: rec.CreatedAt, UpdatedAt: rec.UpdatedAt,
 	}
 	for _, dr := range rec.Disks {
-		d := engine.DiskInfo{Device: dr.Device, CapacityBytes: dr.CapacityBytes, State: engine.DiskState(dr.State)}
+		d := engine.DiskInfo{Device: dr.Device, CapacityBytes: dr.CapacityBytes, State: engine.DiskState(dr.State), FailedAt: dr.FailedAt}
 		for _, sr := range dr.Slices {
 			d.Slices = append(d.Slices, engine.SliceInfo{
 				TierIndex: sr.TierIndex, PartitionNumber: sr.PartitionNumber,
