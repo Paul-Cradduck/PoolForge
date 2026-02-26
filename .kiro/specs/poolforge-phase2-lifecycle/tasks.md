@@ -143,7 +143,7 @@ Incremental build-up of Phase 2 lifecycle operations on top of the Phase 1 found
 
   - [ ]* 7.5 Write property test for reshape parity mode preservation (P20)
     - **Property 20: Reshape preserves parity mode**
-    - Generate random pool with parity mode and random add-disk/remove-disk operations, verify: RAID level after reshape matches parity mode + new eligible count per selection table (SHR-1: ≥3→RAID5, 2→RAID1; SHR-2: ≥4→RAID6, 3→RAID5, 2→RAID1)
+    - Generate random pool with parity mode and random add-disk/remove-disk operations, verify: RAID level after reshape matches parity mode + new eligible count per selection table (parity1: ≥3→RAID5, 2→RAID1; parity2: ≥4→RAID6, 3→RAID5, 2→RAID1)
     - File: `internal/engine/engine_prop_test.go`
     - **Validates: Requirements 2.5**
 
@@ -225,7 +225,7 @@ Incremental build-up of Phase 2 lifecycle operations on top of the Phase 1 found
     - Test remove from 3-disk RAID 5 → 2-disk RAID 1 (downgrade)
     - Test remove from 2-disk pool → rejection (minimum 2 disks)
     - Test remove disk that is sole eligible for a tier → tier destruction
-    - Test SHR-2 downgrade paths: RAID 6 → RAID 5, RAID 5 → RAID 1
+    - Test parity2 downgrade paths: RAID 6 → RAID 5, RAID 5 → RAID 1
     - _Requirements: 12.1_
 
 - [ ] 10. Checkpoint — Verify add-disk, replace-disk, remove-disk
@@ -265,7 +265,7 @@ Incremental build-up of Phase 2 lifecycle operations on top of the Phase 1 found
     - Identify all RAID arrays containing slices from failed disk, mark as degraded
     - Log failure with disk descriptor and timestamp
     - If hot spare available: for each degraded array, `AddMember` with spare slice to initiate rebuild
-    - Handle double failure: SHR-1 → mark arrays as failed + critical alert; SHR-2 (RAID 6) → remain degraded + warning alert
+    - Handle double failure: parity1 → mark arrays as failed + critical alert; parity2 (RAID 6) → remain degraded + warning alert
     - Save updated pool state to metadata
     - _Requirements: 1.1, 1.2, 1.4, 1.5, 1.6, 1.8_
 
@@ -304,7 +304,7 @@ Incremental build-up of Phase 2 lifecycle operations on top of the Phase 1 found
 
   - [ ]* 12.7 Write property test for double failure behavior (P38)
     - **Property 38: Double failure behavior depends on parity mode**
-    - Generate random pool with active rebuild and second disk failure on same array, verify: SHR-1 → array marked failed; SHR-2 (RAID 6) → array remains degraded. Both cases log both failed disk descriptors.
+    - Generate random pool with active rebuild and second disk failure on same array, verify: parity1 → array marked failed; parity2 (RAID 6) → array remains degraded. Both cases log both failed disk descriptors.
     - File: `internal/engine/engine_prop_test.go`
     - **Validates: Requirements 1.5, 1.6**
 
@@ -317,8 +317,8 @@ Incremental build-up of Phase 2 lifecycle operations on top of the Phase 1 found
   - [ ]* 12.9 Write unit tests for self-healing
     - Extend `internal/engine/engine_test.go`
     - Test single disk failure → disk marked failed, arrays degraded, rebuild with spare
-    - Test double failure SHR-1 → arrays marked failed, critical alert
-    - Test double failure SHR-2 → arrays remain degraded, warning alert
+    - Test double failure parity1 → arrays marked failed, critical alert
+    - Test double failure parity2 → arrays remain degraded, warning alert
     - Test failure with no spare → warning logged, no rebuild
     - Test rebuild progress query during active rebuild
     - _Requirements: 12.1, 12.3_

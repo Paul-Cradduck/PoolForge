@@ -506,10 +506,10 @@ Algorithm:
    - Whether removal is safe (no data loss path exists)
 
 RAID Level Downgrade Paths:
-  SHR-1:
+  parity1:
     RAID 5 (≥3 disks) → RAID 1 (2 disks)    [safe: single parity maintained]
     RAID 1 (2 disks)  → cannot remove         [would leave 1 disk, no redundancy]
-  SHR-2:
+  parity2:
     RAID 6 (≥4 disks) → RAID 5 (3 disks)     [safe: loses double parity, keeps single]
     RAID 5 (3 disks)  → RAID 1 (2 disks)     [safe: single parity maintained]
     RAID 1 (2 disks)  → cannot remove         [would leave 1 disk, no redundancy]
@@ -569,9 +569,9 @@ The monitor operates in a loop:
 4. **Dispatch**: Call registered handlers (which invoke `Engine.HandleDiskFailure` or update rebuild state)
 5. **Poll**: Separately, a progress poller reads `/proc/mdstat` every 5 seconds during active rebuilds to update percentage and ETA in metadata
 
-#### SHR-1 vs SHR-2 Double-Failure Handling
+#### parity1 vs parity2 Double-Failure Handling
 
-| Scenario | SHR-1 Behavior | SHR-2 Behavior |
+| Scenario | parity1 Behavior | parity2 Behavior |
 |----------|----------------|----------------|
 | 1st disk fails | Arrays degrade, rebuild starts if spare available | Arrays degrade, rebuild starts if spare available |
 | 2nd disk fails during rebuild (same array) | Array marked FAILED, critical alert logged | Array remains DEGRADED (double parity absorbs), warning logged |
@@ -757,7 +757,7 @@ Phase 2 adds 7 new commands to the existing CLI:
 
 ```
 # Phase 1 (unchanged)
-poolforge pool create --disks /dev/sdb,/dev/sdc,/dev/sdd --parity shr1 --name mypool
+poolforge pool create --disks /dev/sdb,/dev/sdc,/dev/sdd --parity parity1 --name mypool
 poolforge pool status <pool-name>
 poolforge pool list
 
@@ -797,7 +797,7 @@ Phase 2 adds fields to the existing Version 1 schema. The additions are backward
     "<pool-id>": {
       "id": "<uuid>",
       "name": "<pool-name>",
-      "parity_mode": "shr1|shr2",
+      "parity_mode": "parity1|parity2",
       "state": "healthy|degraded|failed",
       "disks": [
         {
@@ -871,7 +871,7 @@ The export format is a self-contained JSON document with a schema version for fo
   "pool": {
     "id": "<uuid>",
     "name": "<pool-name>",
-    "parity_mode": "shr1",
+    "parity_mode": "parity1",
     "state": "healthy",
     "disks": [
       {
@@ -1020,13 +1020,13 @@ Property numbering uses the master design document numbering (P8–P20) for prop
 
 ### Property 20: Reshape preserves parity mode
 
-*For any* RAID array reshape triggered by add-disk or remove-disk, the RAID level after reshape should be consistent with the pool's parity mode and the new eligible disk count per the RAID level selection table (SHR-1: ≥3→RAID5, 2→RAID1; SHR-2: ≥4→RAID6, 3→RAID5, 2→RAID1).
+*For any* RAID array reshape triggered by add-disk or remove-disk, the RAID level after reshape should be consistent with the pool's parity mode and the new eligible disk count per the RAID level selection table (parity1: ≥3→RAID5, 2→RAID1; parity2: ≥4→RAID6, 3→RAID5, 2→RAID1).
 
 **Validates: Requirements 2.5**
 
 ### Property 38: Double failure behavior depends on parity mode
 
-*For any* pool experiencing a second disk failure while a rebuild is in progress on the same array, the resulting array state should depend on the parity mode: under SHR-1, the array should be marked as failed; under SHR-2 (with RAID 6), the array should remain in degraded state. In both cases, a log entry should identify both failed disk descriptors.
+*For any* pool experiencing a second disk failure while a rebuild is in progress on the same array, the resulting array state should depend on the parity mode: under parity1, the array should be marked as failed; under parity2 (with RAID 6), the array should remain in degraded state. In both cases, a log entry should identify both failed disk descriptors.
 
 **Validates: Requirements 1.5, 1.6**
 
@@ -1148,8 +1148,8 @@ All Phase 2 lifecycle operations perform pre-operation checks before modifying a
 | HealthMonitor cannot start mdadm monitor | Log error, retry with exponential backoff | 1.7 |
 | Failure event for unknown pool | Log warning, ignore event | — |
 | Rebuild initiation failure (no spare) | Log warning: "no spare available for rebuild of /dev/mdX" | 1.2 |
-| Second disk failure during rebuild (SHR-1) | Mark arrays as failed, log critical alert | 1.5 |
-| Second disk failure during rebuild (SHR-2) | Continue degraded, log warning alert | 1.6 |
+| Second disk failure during rebuild (parity1) | Mark arrays as failed, log critical alert | 1.5 |
+| Second disk failure during rebuild (parity2) | Continue degraded, log warning alert | 1.6 |
 | Rebuild progress poll failure | Log warning, retry next poll cycle | 1.9 |
 
 ### Serialization Errors
@@ -1193,7 +1193,7 @@ Unit tests focus on:
 - **Remove-disk examples**: Remove a disk from a 4-disk RAID 5 pool → verify downgrade to 3-disk RAID 5
 - **Remove-disk edge cases**: Remove from 3-disk RAID 5 → downgrade to RAID 1, remove from 2-disk pool → rejection
 - **Delete-pool examples**: Delete one pool in a multi-pool system → verify other pool untouched
-- **Self-healing examples**: Single disk failure → rebuild with spare, double failure in SHR-1 → array failed
+- **Self-healing examples**: Single disk failure → rebuild with spare, double failure in parity1 → array failed
 - **Serialization examples**: Export a known pool → verify JSON structure, import invalid JSON → verify rejection
 - **Error conditions**: All pre-operation check failures, invalid disk descriptors, signature mismatches
 - **Phase 1 regression**: All Phase 1 unit tests continue to pass unchanged

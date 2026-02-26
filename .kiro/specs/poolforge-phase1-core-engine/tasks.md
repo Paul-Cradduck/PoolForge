@@ -186,7 +186,7 @@ Incremental build-up of the PoolForge storage management tool in Go. Starts with
     - Test specific example: 3 disks of 1 TB/2 TB/4 TB → expected tiers, RAID levels, slice counts
     - Test minimum disk count rejection (< 2 disks)
     - Test all-same-size disks (single tier, uniform pool)
-    - Test SHR-2 with exactly 2 disks → RAID 1
+    - Test parity2 with exactly 2 disks → RAID 1
     - Test disk conflict detection
     - Test pool name uniqueness
     - Test pool not found error
@@ -199,8 +199,8 @@ Incremental build-up of the PoolForge storage management tool in Go. Starts with
 - [ ] 9. CLI implementation
   - [ ] 9.1 Implement CLI framework and `pool create` command
     - Update `cmd/poolforge/main.go` with CLI argument parsing (use `cobra` or stdlib `flag`)
-    - Implement `pool create --disks /dev/sdb,/dev/sdc --parity shr1 --name mypool`
-    - Parse comma-separated disk list, validate parity mode flag (shr1/shr2)
+    - Implement `pool create --disks /dev/sdb,/dev/sdc --parity parity1 --name mypool`
+    - Parse comma-separated disk list, validate parity mode flag (parity1/parity2)
     - Call `EngineService.CreatePool` and display pool summary (name, parity, tier count, capacity)
     - _Requirements: 1.1, 4.1_
 

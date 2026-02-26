@@ -2,7 +2,7 @@
 
 ## Introduction
 
-This document specifies the requirements for Phase 1 of the PoolForge project. PoolForge is an open-source storage management tool for Ubuntu LTS (24.04+) that replicates Synology Hybrid RAID (SHR) functionality using mdadm and LVM. The full project scope is defined in the master spec at `.kiro/specs/hybrid-raid-manager/`.
+This document specifies the requirements for Phase 1 of the PoolForge project. PoolForge is an open-source storage management tool for Ubuntu LTS (24.04+) that replicates hybrid RAID functionality using mdadm and LVM. The full project scope is defined in the master spec at `.kiro/specs/hybrid-raid-manager/`.
 
 Phase 1 establishes the core engine: capacity-tier computation from mixed-size disks, GPT disk partitioning, mdadm RAID array creation, LVM stitching (PV → VG → LV), ext4 filesystem creation, a CLI for pool management, and a JSON-based metadata store with atomic writes. Phase 1 also delivers the automated cloud-based test infrastructure (Terraform IaC for EC2 + EBS, Test_Runner script) so that real-disk integration testing is available from the start.
 
@@ -26,7 +26,7 @@ Phase 1 interfaces (EngineService, StorageAbstraction, MetadataStore) are design
 - **RAID_Array**: An mdadm software RAID array composed of same-sized Slices from different disks
 - **Volume_Group**: An LVM volume group that aggregates all RAID_Arrays in a single Pool as physical volumes. Each Pool has exactly one Volume_Group
 - **Logical_Volume**: An LVM logical volume created on top of the Volume_Group, presented as the usable storage. Each Pool has exactly one Logical_Volume
-- **Parity_Mode**: The redundancy level — SHR-1 (single parity, RAID 5 behavior) or SHR-2 (double parity, RAID 6 behavior)
+- **Parity_Mode**: The redundancy level — parity1 (single parity, RAID 5 behavior) or parity2 (double parity, RAID 6 behavior)
 - **Disk_Descriptor**: A block device path (e.g., /dev/sdb) identifying a physical disk managed by PoolForge
 - **Partition_Table**: The GPT partition layout PoolForge creates on each managed disk
 - **Metadata_Store**: A persistent record of Pool configuration, disk membership, Capacity_Tiers, and RAID_Array mappings, stored as JSON with atomic writes (write-to-temp + fsync + rename)
@@ -49,11 +49,11 @@ Phase 1 interfaces (EngineService, StorageAbstraction, MetadataStore) are design
 2. WHEN computing Capacity_Tiers, THE PoolForge SHALL sort all disk capacities, identify unique capacity values, and derive Slice sizes equal to the difference between consecutive sorted unique capacities (with the smallest capacity as the first tier).
 3. WHEN partitioning a disk, THE PoolForge SHALL create one Slice per Capacity_Tier for which the disk has sufficient remaining capacity, using GPT Partition_Tables.
 4. WHEN all disks are partitioned, THE PoolForge SHALL create one RAID_Array per Capacity_Tier from the corresponding Slices across all eligible disks.
-5. WHEN Parity_Mode is SHR-1 and a Capacity_Tier has three or more Slices, THE PoolForge SHALL create the RAID_Array with RAID 5 redundancy.
-6. WHEN Parity_Mode is SHR-1 and a Capacity_Tier has exactly two Slices, THE PoolForge SHALL create the RAID_Array with RAID 1 redundancy.
-7. WHEN Parity_Mode is SHR-2 and a Capacity_Tier has four or more Slices, THE PoolForge SHALL create the RAID_Array with RAID 6 redundancy.
-8. WHEN Parity_Mode is SHR-2 and a Capacity_Tier has exactly three Slices, THE PoolForge SHALL create the RAID_Array with RAID 5 redundancy.
-9. WHEN Parity_Mode is SHR-2 and a Capacity_Tier has exactly two Slices, THE PoolForge SHALL create the RAID_Array with RAID 1 redundancy.
+5. WHEN Parity_Mode is parity1 and a Capacity_Tier has three or more Slices, THE PoolForge SHALL create the RAID_Array with RAID 5 redundancy.
+6. WHEN Parity_Mode is parity1 and a Capacity_Tier has exactly two Slices, THE PoolForge SHALL create the RAID_Array with RAID 1 redundancy.
+7. WHEN Parity_Mode is parity2 and a Capacity_Tier has four or more Slices, THE PoolForge SHALL create the RAID_Array with RAID 6 redundancy.
+8. WHEN Parity_Mode is parity2 and a Capacity_Tier has exactly three Slices, THE PoolForge SHALL create the RAID_Array with RAID 5 redundancy.
+9. WHEN Parity_Mode is parity2 and a Capacity_Tier has exactly two Slices, THE PoolForge SHALL create the RAID_Array with RAID 1 redundancy.
 10. WHEN all RAID_Arrays are created, THE PoolForge SHALL register each RAID_Array as a physical volume in a single Volume_Group and create one Logical_Volume spanning the entire Volume_Group.
 11. WHEN the Logical_Volume is created, THE PoolForge SHALL create an ext4 filesystem on the Logical_Volume.
 12. IF fewer than two Disk_Descriptors are provided, THEN THE PoolForge SHALL reject the request with an error message stating the minimum disk count.

@@ -2,7 +2,7 @@
 
 ## Introduction
 
-PoolForge is an open-source storage management tool for Ubuntu LTS (24.04+) that replicates Synology Hybrid RAID (SHR) functionality using mdadm and LVM. PoolForge automates the partitioning of mixed-size disks into capacity-tier slices, creates multiple mdadm RAID arrays from those slices, and stitches them together via LVM into a single unified logical volume with an ext4 filesystem. The tool supports single-parity (SHR-1/RAID 5) and double-parity (SHR-2/RAID 6) configurations, handles self-healing rebuilds when disks fail, and supports hot-adding or replacing disks of different sizes with automatic array reshaping. PoolForge manages multiple independent Pools on the same system, each with its own isolated set of RAID_Arrays, Volume_Group, and Logical_Volume.
+PoolForge is an open-source storage management tool for Ubuntu LTS (24.04+) that replicates hybrid RAID functionality using mdadm and LVM. PoolForge automates the partitioning of mixed-size disks into capacity-tier slices, creates multiple mdadm RAID arrays from those slices, and stitches them together via LVM into a single unified logical volume with an ext4 filesystem. The tool supports single-parity (parity1 (RAID 5)) and double-parity (parity2 (RAID 6)) configurations, handles self-healing rebuilds when disks fail, and supports hot-adding or replacing disks of different sizes with automatic array reshaping. PoolForge manages multiple independent Pools on the same system, each with its own isolated set of RAID_Arrays, Volume_Group, and Logical_Volume.
 
 The backend is implemented in Go (single binary, system-level operations, strong long-term support). The web portal frontend is implemented in React (widely supported, large ecosystem). The architecture is designed to be extensible for future notification support (email, webhook, Slack) without requiring core redesign.
 
@@ -15,7 +15,7 @@ The backend is implemented in Go (single binary, system-level operations, strong
 - **RAID_Array**: An mdadm software RAID array composed of same-sized Slices from different disks
 - **Volume_Group**: An LVM volume group that aggregates all RAID_Arrays in a single Pool as physical volumes. Each Pool has exactly one Volume_Group
 - **Logical_Volume**: An LVM logical volume created on top of the Volume_Group, presented as the usable storage. Each Pool has exactly one Logical_Volume
-- **Parity_Mode**: The redundancy level — SHR-1 (single parity, RAID 5 behavior) or SHR-2 (double parity, RAID 6 behavior)
+- **Parity_Mode**: The redundancy level — parity1 (single parity, RAID 5 behavior) or parity2 (double parity, RAID 6 behavior)
 - **Disk_Descriptor**: A block device path (e.g., /dev/sdb) identifying a physical disk managed by PoolForge
 - **Partition_Table**: The GPT partition layout PoolForge creates on each managed disk
 - **Rebuild**: The process of reconstructing redundancy in a degraded RAID_Array after a disk failure
@@ -58,11 +58,11 @@ The backend is implemented in Go (single binary, system-level operations, strong
 2. WHEN computing Capacity_Tiers, THE PoolForge SHALL sort all disk capacities, identify unique capacity values, and derive Slice sizes equal to the difference between consecutive sorted unique capacities (with the smallest capacity as the first tier).
 3. WHEN partitioning a disk, THE PoolForge SHALL create one Slice per Capacity_Tier for which the disk has sufficient remaining capacity, using GPT Partition_Tables.
 4. WHEN all disks are partitioned, THE PoolForge SHALL create one RAID_Array per Capacity_Tier from the corresponding Slices across all eligible disks.
-5. WHEN Parity_Mode is SHR-1 and a Capacity_Tier has three or more Slices, THE PoolForge SHALL create the RAID_Array with RAID 5 redundancy.
-6. WHEN Parity_Mode is SHR-1 and a Capacity_Tier has exactly two Slices, THE PoolForge SHALL create the RAID_Array with RAID 1 redundancy.
-7. WHEN Parity_Mode is SHR-2 and a Capacity_Tier has four or more Slices, THE PoolForge SHALL create the RAID_Array with RAID 6 redundancy.
-8. WHEN Parity_Mode is SHR-2 and a Capacity_Tier has exactly three Slices, THE PoolForge SHALL create the RAID_Array with RAID 5 redundancy.
-9. WHEN Parity_Mode is SHR-2 and a Capacity_Tier has exactly two Slices, THE PoolForge SHALL create the RAID_Array with RAID 1 redundancy.
+5. WHEN Parity_Mode is parity1 and a Capacity_Tier has three or more Slices, THE PoolForge SHALL create the RAID_Array with RAID 5 redundancy.
+6. WHEN Parity_Mode is parity1 and a Capacity_Tier has exactly two Slices, THE PoolForge SHALL create the RAID_Array with RAID 1 redundancy.
+7. WHEN Parity_Mode is parity2 and a Capacity_Tier has four or more Slices, THE PoolForge SHALL create the RAID_Array with RAID 6 redundancy.
+8. WHEN Parity_Mode is parity2 and a Capacity_Tier has exactly three Slices, THE PoolForge SHALL create the RAID_Array with RAID 5 redundancy.
+9. WHEN Parity_Mode is parity2 and a Capacity_Tier has exactly two Slices, THE PoolForge SHALL create the RAID_Array with RAID 1 redundancy.
 10. WHEN all RAID_Arrays are created, THE PoolForge SHALL register each RAID_Array as a physical volume in a single Volume_Group and create one Logical_Volume spanning the entire Volume_Group.
 11. WHEN the Logical_Volume is created, THE PoolForge SHALL create an ext4 filesystem on the Logical_Volume.
 12. IF fewer than two Disk_Descriptors are provided, THEN THE PoolForge SHALL reject the request with an error message stating the minimum disk count.
@@ -109,8 +109,8 @@ The backend is implemented in Go (single binary, system-level operations, strong
 2. WHEN a hot spare disk is available in the Pool, THE PoolForge SHALL automatically initiate a Rebuild of each degraded RAID_Array using the spare disk.
 3. WHEN a Rebuild completes for a RAID_Array, THE PoolForge SHALL update the Metadata_Store to reflect the restored state and log the completion.
 4. IF multiple RAID_Arrays are degraded due to the same disk failure, THEN THE PoolForge SHALL rebuild all affected RAID_Arrays using the replacement or spare disk.
-5. IF a second disk fails while a Rebuild is in progress in SHR-1 Parity_Mode, THEN THE PoolForge SHALL mark the affected RAID_Arrays as failed and log a critical alert.
-6. IF a second disk fails while a Rebuild is in progress in SHR-2 Parity_Mode, THEN THE PoolForge SHALL continue operating in degraded mode and log a warning alert.
+5. IF a second disk fails while a Rebuild is in progress in parity1 Parity_Mode, THEN THE PoolForge SHALL mark the affected RAID_Arrays as failed and log a critical alert.
+6. IF a second disk fails while a Rebuild is in progress in parity2 Parity_Mode, THEN THE PoolForge SHALL continue operating in degraded mode and log a warning alert.
 
 ### Requirement 5: Add a New Disk to an Existing Pool
 

@@ -649,7 +649,7 @@ Each line in `/var/log/poolforge/events.log` is a JSON object:
 ```json
 {"timestamp":"2025-01-15T10:00:00Z","level":"info","source":"api","message":"Server started on port 8443"}
 {"timestamp":"2025-01-15T10:01:00Z","level":"info","source":"auth","message":"User 'admin' logged in"}
-{"timestamp":"2025-01-15T10:02:00Z","level":"info","source":"pool:mypool","message":"Pool created with 4 disks, SHR-1 parity"}
+{"timestamp":"2025-01-15T10:02:00Z","level":"info","source":"pool:mypool","message":"Pool created with 4 disks, parity1 parity"}
 {"timestamp":"2025-01-15T10:05:00Z","level":"warning","source":"disk:/dev/sdb","message":"Disk failure detected"}
 {"timestamp":"2025-01-15T10:05:01Z","level":"error","source":"array:md0","message":"Array degraded: member /dev/sdb1 failed"}
 {"timestamp":"2025-01-15T10:10:00Z","level":"warning","source":"auth","message":"Failed login attempt for user 'admin'"}
@@ -681,7 +681,7 @@ Each line in `/var/log/poolforge/events.log` is a JSON object:
   "id": "uuid-1234",
   "name": "mypool",
   "state": "healthy",
-  "parity_mode": "shr1",
+  "parity_mode": "parity1",
   "total_capacity_bytes": 3000000000000,
   "used_capacity_bytes": 1200000000000,
   "mount_point": "/mnt/poolforge/mypool",
@@ -954,7 +954,7 @@ Note: Authentication error messages are intentionally generic (same message for 
 | Disk not found in pool | 404 | `{"error":"disk 'X' not found in pool 'Y'"}` | 1.11 |
 | Invalid JSON request body | 400 | `{"error":"invalid request body: <parse error>"}` | 1.11 |
 | Missing required field | 400 | `{"error":"missing required field: X"}` | 1.11 |
-| Invalid parity mode | 400 | `{"error":"invalid parity mode, use shr1 or shr2"}` | 1.11 |
+| Invalid parity mode | 400 | `{"error":"invalid parity mode, use parity1 or parity2"}` | 1.11 |
 | Fewer than 2 disks | 400 | `{"error":"minimum 2 disks required"}` | 1.11 |
 | EngineService error | 500 | `{"error":"<engine error message>"}` | 1.11 |
 

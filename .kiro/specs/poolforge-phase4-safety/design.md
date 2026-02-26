@@ -863,7 +863,7 @@ When an atomic operation is in progress, the `checkpoint` field contains:
     "pool_snapshot": {
       "id": "pool-uuid-5678",
       "name": "mypool",
-      "parity_mode": "shr1",
+      "parity_mode": "parity1",
       "state": "healthy",
       "disks": ["...full pool state..."],
       "capacity_tiers": ["..."],
