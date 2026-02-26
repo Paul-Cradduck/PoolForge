@@ -47,6 +47,7 @@ button.danger:hover { background: var(--red); color: #fff; }
 .badge.degraded { background: rgba(234,179,8,0.15); color: var(--yellow); }
 .badge.failed { background: rgba(239,68,68,0.15); color: var(--red); }
 .badge.rebuilding { background: rgba(59,130,246,0.15); color: var(--accent); }
+.badge.expanding { background: rgba(59,130,246,0.15); color: var(--accent); }
 
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th { text-align: left; color: var(--muted); font-weight: 500; padding: 8px 12px; border-bottom: 1px solid var(--border); }
@@ -177,6 +178,7 @@ async function refresh() {
     let html = '';
     for (const p of pools) {
       const status = await api('/pools/' + p.ID);
+      poolStatusCache[p.ID] = status;
       html += renderPool(p, status);
     }
     el.innerHTML = html;
@@ -199,11 +201,51 @@ function renderPool(summary, status) {
   ).join('');
 
   let diskRows = disks.map(d =>
-    `<tr><td>${d.Device}</td><td>${badge(d.State)}</td>
+    `<tr><td>${d.Device}</td><td>${fmtBytes(d.CapacityBytes)}</td><td>${badge(d.State)}</td>
      <td style="font-size:11px;color:var(--muted)">${(d.ContributingArrays||[]).join(', ')}</td></tr>`
   ).join('');
 
   const rebuilding = arrays.some(a => a.State === 'rebuilding');
+
+  // Build slice visualization
+  const tierColors = ['#3b82f6','#8b5cf6','#ec4899','#f59e0b','#10b981','#ef4444'];
+  const poolDisks = pool.Disks || [];
+  const maxCap = Math.max(...poolDisks.map(d => d.CapacityBytes || 0), 1);
+  let sliceMapHTML = '<div style="margin:12px 0">';
+  sliceMapHTML += '<h3 style="font-size:13px;margin-bottom:8px">Disk Layout</h3>';
+  // Legend
+  sliceMapHTML += '<div style="display:flex;gap:12px;margin-bottom:8px;font-size:11px">';
+  const tierSet = new Set();
+  poolDisks.forEach(d => (d.Slices||[]).forEach(s => tierSet.add(s.TierIndex)));
+  [...tierSet].sort().forEach(ti => {
+    const arr = arrays.find(a => a.TierIndex === ti);
+    const label = arr ? `Tier ${ti} → ${arr.Device} (RAID${arr.RAIDLevel})` : `Tier ${ti}`;
+    sliceMapHTML += `<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${tierColors[ti%tierColors.length]};margin-right:4px;vertical-align:middle"></span>${label}</span>`;
+  });
+  sliceMapHTML += '</div>';
+  // Bars
+  poolDisks.forEach(d => {
+    const w = ((d.CapacityBytes||0) / maxCap * 100);
+    sliceMapHTML += `<div style="display:flex;align-items:center;margin:3px 0;gap:8px">`;
+    sliceMapHTML += `<div style="width:90px;font-size:11px;text-align:right;flex-shrink:0;color:${d.State==='failed'?'var(--red)':'var(--text)'}">${d.Device.replace('/dev/','')}<br><span style="color:var(--muted)">${fmtBytes(d.CapacityBytes)}</span></div>`;
+    sliceMapHTML += `<div style="flex:1;display:flex;height:24px;border-radius:4px;overflow:hidden;background:var(--border);max-width:${w}%">`;
+    const slices = (d.Slices||[]).sort((a,b) => a.TierIndex - b.TierIndex);
+    const totalSlice = slices.reduce((s,sl) => s + (sl.SizeBytes||0), 0);
+    const diskCap = d.CapacityBytes || totalSlice;
+    slices.forEach(sl => {
+      const pct = diskCap > 0 ? (sl.SizeBytes / diskCap * 100) : 0;
+      const color = tierColors[sl.TierIndex % tierColors.length];
+      const opacity = d.State === 'failed' ? '0.3' : '1';
+      sliceMapHTML += `<div style="width:${pct}%;background:${color};opacity:${opacity};display:flex;align-items:center;justify-content:center;font-size:9px;color:#fff;font-weight:600" title="Tier ${sl.TierIndex}: ${fmtBytes(sl.SizeBytes)}">T${sl.TierIndex}</div>`;
+    });
+    const freeBytes = diskCap - totalSlice;
+    if (freeBytes > diskCap * 0.01) {
+      const freePct = (freeBytes / diskCap * 100);
+      sliceMapHTML += `<div style="width:${freePct}%;background:var(--border);display:flex;align-items:center;justify-content:center;font-size:9px;color:var(--muted)" title="Free: ${fmtBytes(freeBytes)}">free</div>`;
+    }
+    sliceMapHTML += '</div></div>';
+  });
+  sliceMapHTML += '</div>';
 
   return `
   <div class="card">
@@ -217,14 +259,61 @@ function renderPool(summary, status) {
     </h2>
     <div style="font-size:12px;color:var(--muted);margin-bottom:12px">
       ID: ${pool.ID} &nbsp;|&nbsp; ${fmtParity(pool.ParityMode)} &nbsp;|&nbsp;
-      ${fmtBytes(summary.TotalCapacityBytes)} total, ${fmtBytes(summary.UsedCapacityBytes)} used &nbsp;|&nbsp;
       Mount: ${pool.MountPoint}
     </div>
+    ${(() => {
+      const rawTotal = poolDisks.reduce((s,d) => s + (d.CapacityBytes||0), 0);
+      const usable = status.TotalCapacityBytes || 0;
+      const used = status.UsedCapacityBytes || 0;
+      const free = status.FreeCapacityBytes || (usable - used);
+      const unallocated = poolDisks.reduce((s,d) => {
+        const sliced = (d.Slices||[]).reduce((ss,sl) => ss + (sl.SizeBytes||0), 0);
+        return s + ((d.CapacityBytes||0) - sliced);
+      }, 0);
+      const slicedTotal = poolDisks.reduce((s,d) => s + (d.Slices||[]).reduce((ss,sl) => ss + (sl.SizeBytes||0), 0), 0);
+      // Compute actual RAID parity from array geometry
+      let raidParity = 0;
+      for (const a of arrays) {
+        const n = (a.Members||[]).length;
+        if (a.RAIDLevel === 5 && n > 1) raidParity += a.CapacityBytes / (n - 1);
+        else if (a.RAIDLevel === 6 && n > 2) raidParity += a.CapacityBytes / (n - 2) * 2;
+        else if (a.RAIDLevel === 1) raidParity += a.CapacityBytes;
+      }
+      const overhead = slicedTotal - raidParity - usable;
+      const usablePct = rawTotal > 0 ? (usable / rawTotal * 100).toFixed(0) : 0;
+      const parityPct = rawTotal > 0 ? (raidParity / rawTotal * 100).toFixed(0) : 0;
+      // Stacked bar
+      const usedOfUsable = usable > 0 ? (used / usable * 100) : 0;
+      const freeOfUsable = usable > 0 ? (free / usable * 100) : 0;
+      const parityOfRaw = rawTotal > 0 ? (raidParity / rawTotal * 100) : 0;
+      const overheadOfRaw = rawTotal > 0 ? (Math.max(0,overhead) / rawTotal * 100) : 0;
+      const unallocOfRaw = rawTotal > 0 ? (unallocated / rawTotal * 100) : 0;
+      const usableOfRaw = 100 - parityOfRaw - overheadOfRaw - unallocOfRaw;
+      return `
+      <div style="margin-bottom:14px">
+        <div style="display:flex;gap:20px;font-size:13px;margin-bottom:6px">
+          <div><span style="color:var(--muted)">Raw Disk Total:</span> ${fmtBytes(rawTotal)}</div>
+          <div><span style="color:var(--muted)">Usable:</span> ${fmtBytes(usable)} <span style="color:var(--green)">(${usablePct}%)</span></div>
+          <div><span style="color:var(--muted)">Used:</span> ${fmtBytes(used)}${usable > 0 ? ` (${(used/usable*100).toFixed(1)}%)` : ''}</div>
+          <div><span style="color:var(--muted)">Protection:</span> ${fmtBytes(raidParity)} <span style="color:var(--accent)">(${parityPct}%)</span></div>
+          ${overhead > 0 ? `<div><span style="color:var(--muted)">Overhead:</span> ${fmtBytes(overhead)}</div>` : ''}
+          ${unallocated > 0 ? `<div><span style="color:var(--muted)">Expansion Potential:</span> <span style="color:var(--yellow)">${fmtBytes(unallocated)}</span></div>` : ''}
+        </div>
+        <div style="display:flex;height:20px;border-radius:4px;overflow:hidden;font-size:10px;font-weight:600">
+          ${used > 0 ? `<div style="width:${usedOfUsable * usableOfRaw / 100}%;background:var(--green);display:flex;align-items:center;justify-content:center;color:#fff" title="Used: ${fmtBytes(used)}">Used</div>` : ''}
+          <div style="width:${freeOfUsable * usableOfRaw / 100}%;background:rgba(34,197,94,0.2);display:flex;align-items:center;justify-content:center;color:var(--green)" title="Free: ${fmtBytes(free)}">Free ${fmtBytes(free)}</div>
+          <div style="width:${parityOfRaw}%;background:rgba(59,130,246,0.25);display:flex;align-items:center;justify-content:center;color:var(--accent)" title="Parity/Redundancy: ${fmtBytes(raidParity)}">Parity ${fmtBytes(raidParity)}</div>
+          ${overheadOfRaw > 0.5 ? `<div style="width:${overheadOfRaw}%;background:rgba(234,179,8,0.2);display:flex;align-items:center;justify-content:center;color:var(--yellow);font-size:9px" title="LVM/ext4/mdadm overhead: ${fmtBytes(overhead)}">Overhead</div>` : ''}
+          ${unallocOfRaw > 0.5 ? `<div style="width:${unallocOfRaw}%;background:var(--border);display:flex;align-items:center;justify-content:center;color:var(--muted)" title="Unallocated: ${fmtBytes(unallocated)} — add more disks to create new tiers">Expansion ${fmtBytes(unallocated)}</div>` : ''}
+        </div>
+      </div>`;
+    })()}
     <div id="rebuild-${pool.ID}"></div>
     <h3 style="font-size:13px;margin:12px 0 6px">Arrays</h3>
     <table><tr><th>Device</th><th>Level</th><th>Tier</th><th>State</th><th>Capacity</th><th>Members</th></tr>${arrayRows}</table>
     <h3 style="font-size:13px;margin:12px 0 6px">Disks</h3>
-    <table><tr><th>Device</th><th>State</th><th>Arrays</th></tr>${diskRows}</table>
+    <table><tr><th>Device</th><th>Size</th><th>State</th><th>Arrays</th></tr>${diskRows}</table>
+    ${sliceMapHTML}
   </div>`;
 }
 
@@ -247,6 +336,9 @@ async function createPool() {
   const disks = Array.from(chips).map(c => c.dataset.dev);
   if (!name) return toast('Enter a pool name', true);
   if (disks.length < 2) return toast('Select at least 2 disks', true);
+  const btn = document.querySelector('#createModal .primary');
+  btn.textContent = 'Creating...';
+  btn.disabled = true;
   try {
     await api('/pools', { method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({name, disks, parityMode: parity}) });
@@ -254,34 +346,108 @@ async function createPool() {
     toast('Pool created');
     refresh();
   } catch(e) { toast(e.message, true); }
+  finally { btn.textContent = 'Create'; btn.disabled = false; }
 }
 
 // --- Disk Actions ---
-function showAddDisk(poolID) {
-  showAction('Add Disk', `<label>Disk Device</label><input id="actDisk" placeholder="/dev/nvme3n1">`,
-    async () => {
-      await api('/pools/' + poolID + '/disks', { method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({disk: document.getElementById('actDisk').value}) });
-      toast('Disk added'); closeModal('actionModal'); refresh();
-    });
+let poolStatusCache = {};
+
+function chipSelector(id, disks, label) {
+  let html = `<label>${label}</label><div class="disk-select" id="${id}">`;
+  for (const d of disks) {
+    const extra = d.sizeGB ? ` (${d.sizeGB.toFixed(1)}G)` : '';
+    const stateTag = d.state ? ` ${badge(d.state)}` : '';
+    html += `<div class="disk-chip" data-dev="${d.device}" onclick="chipSelect('${id}', this)">${d.device}${extra}${stateTag}</div>`;
+  }
+  html += '</div>';
+  return html;
 }
 
-function showFailDisk(poolID) {
-  showAction('Mark Disk Failed', `<label>Disk Device</label><input id="actDisk" placeholder="/dev/nvme2n1">`,
+function chipSelect(groupId, el) {
+  // Single-select: deselect siblings, select this one
+  document.querySelectorAll('#' + groupId + ' .disk-chip').forEach(c => c.classList.remove('selected'));
+  el.classList.toggle('selected');
+}
+
+function getChipValue(groupId) {
+  const sel = document.querySelector('#' + groupId + ' .disk-chip.selected');
+  return sel ? sel.dataset.dev : '';
+}
+
+async function showAddDisk(poolID) {
+  const disks = await api('/disks');
+  const free = disks.filter(d => !d.inUse);
+  const previewDiv = '<div id="addDiskPreview" style="margin-top:12px"></div>';
+  showAction('Add Disk',
+    (free.length ? chipSelector('addDiskSel', free, 'Select an available disk') : '<p style="color:var(--muted)">No available disks</p>') + previewDiv,
     async () => {
+      const dev = getChipValue('addDiskSel');
+      if (!dev) return toast('Select a disk', true);
+      await api('/pools/' + poolID + '/disks', { method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({disk: dev}) });
+      toast('Disk added'); closeModal('actionModal'); refresh();
+    });
+  // Attach preview on chip click
+  setTimeout(() => {
+    document.querySelectorAll('#addDiskSel .disk-chip').forEach(chip => {
+      const origClick = chip.onclick;
+      chip.onclick = async function(e) {
+        chipSelect('addDiskSel', this);
+        const dev = this.dataset.dev;
+        const el = document.getElementById('addDiskPreview');
+        el.innerHTML = '<span style="color:var(--muted);font-size:12px">Calculating...</span>';
+        try {
+          const p = await api('/preview-add', { method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({poolID, disk: dev}) });
+          el.innerHTML = `
+            <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:13px">
+              <div style="display:flex;justify-content:space-between;margin-bottom:8px">
+                <span style="color:var(--muted)">Current capacity</span><span>${fmtBytes(p.currentCapacity)}</span>
+              </div>
+              <div style="display:flex;justify-content:space-between;margin-bottom:8px">
+                <span style="color:var(--muted)">After adding ${dev.replace('/dev/','')}</span><span style="color:var(--green)">${fmtBytes(p.projectedCapacity)}</span>
+              </div>
+              <div style="display:flex;justify-content:space-between;margin-bottom:8px">
+                <span style="color:var(--muted)">Capacity gain</span><span style="color:var(--green)">+${fmtBytes(p.gainBytes)}</span>
+              </div>
+              <div style="display:flex;justify-content:space-between">
+                <span style="color:var(--muted)">Tiers</span><span>${p.currentTiers} → ${p.projectedTiers}</span>
+              </div>
+            </div>`;
+        } catch(e) { el.innerHTML = `<span style="color:var(--red);font-size:12px">${e.message}</span>`; }
+      };
+    });
+  }, 0);
+}
+
+async function showFailDisk(poolID) {
+  const status = poolStatusCache[poolID];
+  const poolDisks = (status?.DiskStatuses || []).filter(d => d.State === 'healthy').map(d => ({device: d.Device, state: d.State}));
+  showAction('Mark Disk Failed',
+    poolDisks.length ? chipSelector('failDiskSel', poolDisks, 'Select a pool disk to fail') : '<p style="color:var(--muted)">No healthy disks</p>',
+    async () => {
+      const dev = getChipValue('failDiskSel');
+      if (!dev) return toast('Select a disk', true);
       await api('/pools/' + poolID + '/fail-disk', { method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({disk: document.getElementById('actDisk').value}) });
+        body: JSON.stringify({disk: dev}) });
       toast('Disk marked failed'); closeModal('actionModal'); refresh();
     });
 }
 
-function showReplaceDisk(poolID) {
-  showAction('Replace Disk', `
-    <label>Failed Disk</label><input id="actOld" placeholder="/dev/nvme2n1">
-    <label>New Disk</label><input id="actNew" placeholder="/dev/nvme3n1">`,
+async function showReplaceDisk(poolID) {
+  const status = poolStatusCache[poolID];
+  const failed = (status?.DiskStatuses || []).filter(d => d.State === 'failed').map(d => ({device: d.Device, state: d.State}));
+  const disks = await api('/disks');
+  const free = disks.filter(d => !d.inUse);
+  showAction('Replace Disk',
+    chipSelector('replOldSel', failed.length ? failed : [{device:'(none)', state:'failed'}], 'Failed disk') +
+    chipSelector('replNewSel', free.length ? free : [], 'Replacement disk'),
     async () => {
+      const oldDev = getChipValue('replOldSel');
+      const newDev = getChipValue('replNewSel');
+      if (!oldDev || !newDev) return toast('Select both disks', true);
       await api('/pools/' + poolID + '/replace-disk', { method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({oldDisk: document.getElementById('actOld').value, newDisk: document.getElementById('actNew').value}) });
+        body: JSON.stringify({oldDisk: oldDev, newDisk: newDev}) });
       toast('Disk replaced — rebuilding'); closeModal('actionModal'); refresh();
     });
 }
@@ -290,7 +456,15 @@ function showAction(title, bodyHTML, onSubmit) {
   document.getElementById('actionTitle').textContent = title;
   document.getElementById('actionBody').innerHTML = bodyHTML;
   const btn = document.getElementById('actionSubmit');
-  btn.onclick = async () => { try { await onSubmit(); } catch(e) { toast(e.message, true); } };
+  btn.textContent = 'Submit';
+  btn.disabled = false;
+  btn.onclick = async () => {
+    btn.textContent = 'Working...';
+    btn.disabled = true;
+    try { await onSubmit(); }
+    catch(e) { toast(e.message, true); }
+    finally { btn.textContent = 'Submit'; btn.disabled = false; }
+  };
   document.getElementById('actionModal').classList.add('active');
 }
 
@@ -305,9 +479,10 @@ async function deletePool(id, name) {
 // --- SSE Rebuild Watch ---
 function watchRebuild(poolID) {
   const el = document.getElementById('rebuild-' + poolID);
-  if (!el) return;
-  el.innerHTML = '<div style="font-size:12px;color:var(--muted)">Watching rebuild...</div>';
+  if (!el || activeSSE[poolID]) return;
+  el.innerHTML = '<div style="font-size:12px;color:var(--muted)">Monitoring rebuild...</div>';
   const es = new EventSource(API + '/pools/' + poolID + '/rebuild');
+  activeSSE[poolID] = es;
   es.onmessage = (e) => {
     const evt = JSON.parse(e.data);
     const arrays = evt.pool.ArrayStatuses || [];
@@ -322,8 +497,8 @@ function watchRebuild(poolID) {
     }
     if (html) el.innerHTML = html; else el.innerHTML = '<div style="font-size:12px;color:var(--green)">✓ Rebuild complete</div>';
   };
-  es.addEventListener('done', () => { es.close(); refresh(); });
-  es.addEventListener('error', () => { es.close(); el.innerHTML = ''; });
+  es.addEventListener('done', () => { es.close(); delete activeSSE[poolID]; refresh(); });
+  es.addEventListener('error', () => { es.close(); delete activeSSE[poolID]; el.innerHTML = ''; });
 }
 
 function closeModal(id) { document.getElementById(id).classList.remove('active'); }
@@ -335,8 +510,35 @@ document.querySelectorAll('.modal-overlay').forEach(el => {
 
 // Initial load
 refresh();
-// Auto-refresh every 10s
-setInterval(refresh, 10000);
+// Auto-refresh every 10s (5s when rebuilding)
+let refreshInterval = setInterval(refresh, 10000);
+
+// Track active SSE connections
+let activeSSE = {};
+
+async function autoWatchRebuilds() {
+  try {
+    const pools = await api('/pools');
+    for (const p of pools) {
+      const status = poolStatusCache[p.ID];
+      if (!status) continue;
+      const isRebuilding = (status.ArrayStatuses || []).some(a => a.State === 'rebuilding');
+      if (isRebuilding && !activeSSE[p.ID]) {
+        watchRebuild(p.ID);
+        // Speed up refresh during rebuild
+        clearInterval(refreshInterval);
+        refreshInterval = setInterval(refresh, 5000);
+      }
+      if (!isRebuilding && activeSSE[p.ID]) {
+        activeSSE[p.ID].close();
+        delete activeSSE[p.ID];
+        clearInterval(refreshInterval);
+        refreshInterval = setInterval(refresh, 10000);
+      }
+    }
+  } catch(e) {}
+}
+setInterval(autoWatchRebuilds, 3000);
 </script>
 </body>
 </html>

@@ -3,8 +3,15 @@ package engine
 import (
 	"context"
 	"fmt"
+	"os/exec"
 	"time"
+
+	"github.com/poolforge/poolforge/internal/storage"
 )
+
+func execCommand(name string, args ...string) {
+	exec.Command(name, args...).Run()
+}
 
 // HandleDiskFailure marks a disk as failed and updates all affected arrays to degraded.
 func (e *engineImpl) HandleDiskFailure(ctx context.Context, poolID string, disk string) error {
@@ -195,26 +202,24 @@ func (e *engineImpl) DeletePool(ctx context.Context, poolID string) error {
 	return e.meta.DeletePool(poolID)
 }
 
-// AddDisk adds a new disk to an existing pool, partitions it for matching tiers,
-// reshapes arrays, and extends the LV/filesystem.
+// AddDisk adds a new disk to an existing pool, recomputes tiers,
+// creates new arrays for new tiers, and partitions existing disks for new tiers.
 func (e *engineImpl) AddDisk(ctx context.Context, poolID string, disk string) error {
 	pool, err := e.meta.LoadPool(poolID)
 	if err != nil {
 		return err
 	}
 
-	// Pre-checks: all arrays healthy
 	for _, a := range pool.RAIDArrays {
 		if a.State != ArrayHealthy {
 			return fmt.Errorf("array %s is %s, all arrays must be healthy to add a disk", a.Device, a.State)
 		}
 	}
 
-	// Check disk not in any pool
 	existing, _ := e.meta.ListPools()
 	for _, ps := range existing {
-		p, err := e.meta.LoadPool(ps.ID)
-		if err != nil {
+		p, _ := e.meta.LoadPool(ps.ID)
+		if p == nil {
 			continue
 		}
 		for _, d := range p.Disks {
@@ -229,20 +234,34 @@ func (e *engineImpl) AddDisk(ctx context.Context, poolID string, disk string) er
 		return fmt.Errorf("cannot read disk %s: %w", disk, err)
 	}
 
-	// Partition new disk for matching tiers
+	// Recompute tiers with all disks including the new one
+	allCaps := make([]uint64, 0, len(pool.Disks)+1)
+	for _, d := range pool.Disks {
+		if d.State != DiskFailed {
+			allCaps = append(allCaps, d.CapacityBytes)
+		}
+	}
+	allCaps = append(allCaps, newInfo.CapacityBytes)
+	newTiers := ComputeCapacityTiers(allCaps)
+
+	existingTierSet := map[int]bool{}
+	for _, t := range pool.CapacityTiers {
+		existingTierSet[t.Index] = true
+	}
+
+	// Partition the new disk for ALL tiers it's eligible for
 	if err := e.disk.CreateGPTPartitionTable(disk); err != nil {
 		return err
 	}
-
-	slices := ComputeDiskSlices(newInfo.CapacityBytes, pool.CapacityTiers)
-	var newSlices []SliceInfo
+	newDiskSlices := ComputeDiskSlices(newInfo.CapacityBytes, newTiers)
+	var newDiskSliceInfos []SliceInfo
 	var offset uint64 = 1048576
-	for _, sl := range slices {
+	for _, sl := range newDiskSlices {
 		part, err := e.disk.CreatePartition(disk, offset, sl.SizeBytes)
 		if err != nil {
 			return err
 		}
-		newSlices = append(newSlices, SliceInfo{
+		newDiskSliceInfos = append(newDiskSliceInfos, SliceInfo{
 			TierIndex:       sl.TierIndex,
 			PartitionNumber: part.Number,
 			PartitionDevice: part.Device,
@@ -251,8 +270,11 @@ func (e *engineImpl) AddDisk(ctx context.Context, poolID string, disk string) er
 		offset += sl.SizeBytes
 	}
 
-	// Add slices to existing arrays and reshape
-	for _, sl := range newSlices {
+	// Add new disk slices to existing arrays and reshape
+	for _, sl := range newDiskSliceInfos {
+		if !existingTierSet[sl.TierIndex] {
+			continue
+		}
 		for i := range pool.RAIDArrays {
 			if pool.RAIDArrays[i].TierIndex == sl.TierIndex {
 				if err := e.raid.AddMember(pool.RAIDArrays[i].Device, sl.PartitionDevice); err != nil {
@@ -270,19 +292,96 @@ func (e *engineImpl) AddDisk(ctx context.Context, poolID string, disk string) er
 		}
 	}
 
-	// Add disk to pool
+	// For new tiers: partition existing disks that have free space, create new arrays
+	for _, nt := range newTiers {
+		if existingTierSet[nt.Index] {
+			continue
+		}
+		var members []string
+		for _, sl := range newDiskSliceInfos {
+			if sl.TierIndex == nt.Index {
+				members = append(members, sl.PartitionDevice)
+			}
+		}
+		// Partition existing disks that are eligible for this new tier
+		for i := range pool.Disks {
+			d := &pool.Disks[i]
+			if d.State == DiskFailed {
+				continue
+			}
+			slices := ComputeDiskSlices(d.CapacityBytes, newTiers)
+			var sliceSize uint64
+			for _, sl := range slices {
+				if sl.TierIndex == nt.Index {
+					sliceSize = sl.SizeBytes
+				}
+			}
+			if sliceSize == 0 {
+				continue
+			}
+			alreadyHas := false
+			for _, sl := range d.Slices {
+				if sl.TierIndex == nt.Index {
+					alreadyHas = true
+				}
+			}
+			if alreadyHas {
+				continue
+			}
+			var diskOffset uint64 = 1048576
+			for _, sl := range d.Slices {
+				diskOffset += sl.SizeBytes
+			}
+			part, err := e.disk.CreatePartition(d.Device, diskOffset, sliceSize)
+			if err != nil {
+				return fmt.Errorf("partition %s for new tier %d: %w", d.Device, nt.Index, err)
+			}
+			newSlice := SliceInfo{
+				TierIndex: nt.Index, PartitionNumber: part.Number,
+				PartitionDevice: part.Device, SizeBytes: sliceSize,
+			}
+			d.Slices = append(d.Slices, newSlice)
+			members = append(members, part.Device)
+		}
+
+		if len(members) < 2 {
+			continue
+		}
+		raidLevel, err := SelectRAIDLevel(pool.ParityMode, len(members))
+		if err != nil {
+			continue
+		}
+		mdNum := len(pool.RAIDArrays)
+		for _, m := range members {
+			execCommand("wipefs", "-af", m)
+		}
+		info, err := e.raid.CreateArray(storage.RAIDCreateOpts{
+			Name: fmt.Sprintf("md%d", mdNum), Level: raidLevel,
+			Members: members, MetadataVersion: "1.2",
+		})
+		if err != nil {
+			return fmt.Errorf("create array for tier %d: %w", nt.Index, err)
+		}
+		nt.RAIDArray = info.Device
+		if err := e.lvm.CreatePhysicalVolume(info.Device); err != nil {
+			return err
+		}
+		if err := e.lvm.ExtendVolumeGroup(pool.VolumeGroup, info.Device); err != nil {
+			return err
+		}
+		pool.RAIDArrays = append(pool.RAIDArrays, RAIDArray{
+			Device: info.Device, RAIDLevel: raidLevel, TierIndex: nt.Index,
+			State: ArrayHealthy, Members: members,
+		})
+		pool.CapacityTiers = append(pool.CapacityTiers, nt)
+	}
+
 	pool.Disks = append(pool.Disks, DiskInfo{
-		Device:        disk,
-		CapacityBytes: newInfo.CapacityBytes,
-		State:         DiskHealthy,
-		Slices:        newSlices,
+		Device: disk, CapacityBytes: newInfo.CapacityBytes,
+		State: DiskHealthy, Slices: newDiskSliceInfos,
 	})
 
-	// Extend LV and resize filesystem
-	lvPath := fmt.Sprintf("/dev/%s/%s", pool.VolumeGroup, pool.LogicalVolume)
-	e.lvm.ExtendLogicalVolume(lvPath)
-	e.fs.ResizeFilesystem(lvPath)
-
+	pool.State = PoolExpanding
 	pool.UpdatedAt = time.Now()
 	return e.meta.SavePool(pool)
 }

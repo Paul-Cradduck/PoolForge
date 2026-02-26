@@ -228,17 +228,19 @@ func main() {
 	pool.AddCommand(failDiskCmd)
 
 	// serve — web portal
-	var serveAddr string
+	var serveAddr, serveUser, servePass string
 	serveCmd := &cobra.Command{
 		Use:   "serve",
 		Short: "Start the web management portal",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			srv := api.New(eng)
+			srv := api.NewWithAuth(eng, serveUser, servePass)
 			fmt.Printf("PoolForge web portal: http://%s\n", serveAddr)
 			return http.ListenAndServe(serveAddr, srv)
 		},
 	}
 	serveCmd.Flags().StringVar(&serveAddr, "addr", "0.0.0.0:8080", "Listen address")
+	serveCmd.Flags().StringVar(&serveUser, "user", "", "Basic auth username")
+	serveCmd.Flags().StringVar(&servePass, "pass", "", "Basic auth password")
 	root.AddCommand(serveCmd)
 
 	if err := root.Execute(); err != nil {

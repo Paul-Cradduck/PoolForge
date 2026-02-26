@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"time"
 
 	"github.com/poolforge/poolforge/internal/storage"
@@ -218,11 +219,43 @@ func (e *engineImpl) GetPoolStatus(ctx context.Context, poolID string) (*PoolSta
 	}
 
 	status := &PoolStatus{Pool: *pool}
+	anyReshaping := false
 	for _, a := range pool.RAIDArrays {
+		cap := a.CapacityBytes
+		arrayState := a.State
+		if detail, err := e.raid.GetArrayDetail(a.Device); err == nil {
+			if detail.CapacityBytes > 0 {
+				cap = detail.CapacityBytes
+			}
+		}
+		if sync, err := e.raid.GetSyncStatus(a.Device); err == nil && !sync.InSync {
+			if sync.Action == "reshape" {
+				arrayState = ArrayRebuilding
+				anyReshaping = true
+			}
+		}
 		status.ArrayStatuses = append(status.ArrayStatuses, ArrayStatus{
 			Device: a.Device, RAIDLevel: a.RAIDLevel, TierIndex: a.TierIndex,
-			State: a.State, CapacityBytes: a.CapacityBytes, Members: a.Members,
+			State: arrayState, CapacityBytes: cap, Members: a.Members,
 		})
+	}
+
+	// Auto-expand when all reshapes complete
+	if pool.State == PoolExpanding && !anyReshaping {
+		lvPath := fmt.Sprintf("/dev/%s/%s", pool.VolumeGroup, pool.LogicalVolume)
+		for _, a := range pool.RAIDArrays {
+			exec.Command("pvresize", a.Device).Run()
+		}
+		e.lvm.ExtendLogicalVolume(lvPath)
+		e.fs.ResizeFilesystem(lvPath)
+		pool.State = PoolHealthy
+		pool.UpdatedAt = time.Now()
+		e.meta.SavePool(pool)
+		status.Pool = *pool
+	}
+
+	if pool.State == PoolExpanding {
+		status.Pool.State = PoolExpanding
 	}
 	for _, d := range pool.Disks {
 		var contributing []string
@@ -235,7 +268,13 @@ func (e *engineImpl) GetPoolStatus(ctx context.Context, poolID string) (*PoolSta
 		}
 		status.DiskStatuses = append(status.DiskStatuses, DiskStatusInfo{
 			Device: d.Device, State: d.State, ContributingArrays: contributing,
+			CapacityBytes: d.CapacityBytes,
 		})
+	}
+	if usage, err := e.fs.GetUsage(pool.MountPoint); err == nil {
+		status.TotalCapacityBytes = usage.TotalBytes
+		status.UsedCapacityBytes = usage.UsedBytes
+		status.FreeCapacityBytes = usage.TotalBytes - usage.UsedBytes
 	}
 	return status, nil
 }

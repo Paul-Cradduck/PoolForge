@@ -33,9 +33,10 @@ func ParseParityMode(s string) (ParityMode, error) {
 type PoolState string
 
 const (
-	PoolHealthy  PoolState = "healthy"
-	PoolDegraded PoolState = "degraded"
-	PoolFailed   PoolState = "failed"
+	PoolHealthy   PoolState = "healthy"
+	PoolDegraded  PoolState = "degraded"
+	PoolFailed    PoolState = "failed"
+	PoolExpanding PoolState = "expanding"
 )
 
 type ArrayState string
@@ -116,9 +117,12 @@ type PoolSummary struct {
 }
 
 type PoolStatus struct {
-	Pool          Pool
-	ArrayStatuses []ArrayStatus
-	DiskStatuses  []DiskStatusInfo
+	Pool               Pool
+	ArrayStatuses      []ArrayStatus
+	DiskStatuses       []DiskStatusInfo
+	TotalCapacityBytes uint64
+	UsedCapacityBytes  uint64
+	FreeCapacityBytes  uint64
 }
 
 type ArrayStatus struct {
@@ -134,6 +138,7 @@ type DiskStatusInfo struct {
 	Device             string
 	State              DiskState
 	ContributingArrays []string
+	CapacityBytes      uint64
 }
 
 type RebuildProgress struct {

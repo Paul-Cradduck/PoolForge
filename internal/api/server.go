@@ -19,15 +19,29 @@ var staticFS embed.FS
 type Server struct {
 	engine engine.EngineService
 	mux    *http.ServeMux
+	user   string
+	pass   string
 }
 
 func New(eng engine.EngineService) *Server {
-	s := &Server{engine: eng, mux: http.NewServeMux()}
+	return NewWithAuth(eng, "", "")
+}
+
+func NewWithAuth(eng engine.EngineService, user, pass string) *Server {
+	s := &Server{engine: eng, mux: http.NewServeMux(), user: user, pass: pass}
 	s.routes()
 	return s
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if s.user != "" {
+		u, p, ok := r.BasicAuth()
+		if !ok || u != s.user || p != s.pass {
+			w.Header().Set("WWW-Authenticate", `Basic realm="PoolForge"`)
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+	}
 	s.mux.ServeHTTP(w, r)
 }
 
@@ -35,6 +49,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/pools", s.handlePools)
 	s.mux.HandleFunc("/api/pools/", s.handlePool)
 	s.mux.HandleFunc("/api/disks", s.handleDisks)
+	s.mux.HandleFunc("/api/preview-add", s.handlePreviewAdd)
 
 	sub, _ := fs.Sub(staticFS, "static")
 	s.mux.Handle("/", http.FileServer(http.FS(sub)))
@@ -308,6 +323,83 @@ func (s *Server) handleDisks(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	jsonResp(w, devs)
+}
+
+func (s *Server) handlePreviewAdd(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		PoolID string `json:"poolID"`
+		Disk   string `json:"disk"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpError(w, err, http.StatusBadRequest)
+		return
+	}
+	status, err := s.engine.GetPoolStatus(r.Context(), req.PoolID)
+	if err != nil {
+		httpError(w, err, http.StatusInternalServerError)
+		return
+	}
+
+	// Current capacity from arrays
+	var currentCap uint64
+	for _, a := range status.ArrayStatuses {
+		currentCap += a.CapacityBytes
+	}
+
+	// Build future disk list
+	caps := make([]uint64, 0, len(status.Pool.Disks)+1)
+	for _, d := range status.Pool.Disks {
+		if d.State != engine.DiskFailed {
+			caps = append(caps, d.CapacityBytes)
+		}
+	}
+	// Get new disk size
+	newSize := readSysBlockSize(strings.TrimPrefix(req.Disk, "/dev/"))
+	if newSize > 2*1024*1024 {
+		newSize -= 2 * 1024 * 1024 // GPT overhead
+	}
+	caps = append(caps, newSize)
+
+	// Compute projected tiers
+	tiers := engine.ComputeCapacityTiers(caps)
+	var projectedCap uint64
+	for _, t := range tiers {
+		level, err := engine.SelectRAIDLevel(status.Pool.ParityMode, t.EligibleDiskCount)
+		if err != nil {
+			continue
+		}
+		var dataDiskCount int
+		switch level {
+		case 1:
+			dataDiskCount = 1
+		case 5:
+			dataDiskCount = t.EligibleDiskCount - 1
+		case 6:
+			dataDiskCount = t.EligibleDiskCount - 2
+		}
+		projectedCap += t.SliceSizeBytes * uint64(dataDiskCount)
+	}
+
+	type preview struct {
+		CurrentCapacity   uint64             `json:"currentCapacity"`
+		ProjectedCapacity uint64             `json:"projectedCapacity"`
+		GainBytes         uint64             `json:"gainBytes"`
+		NewDiskSize       uint64             `json:"newDiskSize"`
+		CurrentTiers      int                `json:"currentTiers"`
+		ProjectedTiers    int                `json:"projectedTiers"`
+	}
+	jsonResp(w, preview{
+		CurrentCapacity:   currentCap,
+		ProjectedCapacity: projectedCap,
+		GainBytes:         projectedCap - currentCap,
+		NewDiskSize:       newSize,
+		CurrentTiers:      len(status.Pool.CapacityTiers),
+		ProjectedTiers:    len(tiers),
+	})
 }
 
 func jsonResp(w http.ResponseWriter, v interface{}) {
