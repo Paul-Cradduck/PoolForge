@@ -276,15 +276,9 @@ function renderPool(summary, status) {
         return s + ((d.CapacityBytes||0) - sliced);
       }, 0);
       const slicedTotal = poolDisks.reduce((s,d) => s + (d.Slices||[]).reduce((ss,sl) => ss + (sl.SizeBytes||0), 0), 0);
-      // Compute actual RAID parity from array geometry
-      let raidParity = 0;
-      for (const a of arrays) {
-        const n = (a.Members||[]).length;
-        if (a.RAIDLevel === 5 && n > 1) raidParity += a.CapacityBytes / (n - 1);
-        else if (a.RAIDLevel === 6 && n > 2) raidParity += a.CapacityBytes / (n - 2) * 2;
-        else if (a.RAIDLevel === 1) raidParity += a.CapacityBytes;
-      }
-      const overhead = slicedTotal - raidParity - usable;
+      const sumArrayCap = arrays.reduce((s,a) => s + (a.CapacityBytes||0), 0);
+      const raidParity = slicedTotal - sumArrayCap; // RAID redundancy + mdadm metadata
+      const overhead = sumArrayCap - usable; // LVM + ext4 overhead
       const usablePct = rawTotal > 0 ? (usable / rawTotal * 100).toFixed(0) : 0;
       const parityPct = rawTotal > 0 ? (raidParity / rawTotal * 100).toFixed(0) : 0;
       // Stacked bar
