@@ -21,6 +21,9 @@ type EngineService interface {
 	// Phase 2: Self-Healing
 	HandleDiskFailure(ctx context.Context, poolID string, disk string) error
 	GetRebuildProgress(ctx context.Context, poolID string, arrayDevice string) (*RebuildProgress, error)
+
+	// Import
+	ImportPool() (*ImportResult, error)
 }
 
 // MetadataStore defines the persistence interface.

@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -27,6 +28,65 @@ type Daemon struct {
 	scrub   *ScrubScheduler
 	logs    *LogBuffer
 	stop    chan struct{}
+
+	// Status tracking
+	mu              sync.Mutex
+	startedAt       time.Time
+	lastSMART       time.Time
+	lastBackup      time.Time
+	lastBootConfig  time.Time
+	lastScrubStart  time.Time
+	smartDiskCount  int
+	smartErrors     int
+}
+
+type DaemonStatus struct {
+	Running        bool      `json:"running"`
+	Uptime         string    `json:"uptime"`
+	StartedAt      time.Time `json:"startedAt"`
+	SMART          FeatureStatus `json:"smart"`
+	Scrub          FeatureStatus `json:"scrub"`
+	MetadataBackup FeatureStatus `json:"metadataBackup"`
+	BootConfig     FeatureStatus `json:"bootConfig"`
+	GracefulShutdown FeatureStatus `json:"gracefulShutdown"`
+}
+
+type FeatureStatus struct {
+	Enabled  bool      `json:"enabled"`
+	Interval string    `json:"interval"`
+	LastRun  time.Time `json:"lastRun,omitempty"`
+	Detail   string    `json:"detail,omitempty"`
+}
+
+func (d *Daemon) Status() DaemonStatus {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return DaemonStatus{
+		Running:   !d.startedAt.IsZero(),
+		Uptime:    time.Since(d.startedAt).Truncate(time.Second).String(),
+		StartedAt: d.startedAt,
+		SMART: FeatureStatus{
+			Enabled: true, Interval: d.cfg.SMARTInterval.String(),
+			LastRun: d.lastSMART,
+			Detail:  fmt.Sprintf("%d disks checked, %d errors", d.smartDiskCount, d.smartErrors),
+		},
+		Scrub: FeatureStatus{
+			Enabled: true, Interval: d.cfg.ScrubInterval.String(),
+			LastRun: d.lastScrubStart,
+		},
+		MetadataBackup: FeatureStatus{
+			Enabled: true, Interval: "1h",
+			LastRun: d.lastBackup,
+		},
+		BootConfig: FeatureStatus{
+			Enabled: true, Interval: "on backup",
+			LastRun: d.lastBootConfig,
+		},
+		GracefulShutdown: FeatureStatus{
+			Enabled: true, Interval: "SIGINT/SIGTERM",
+			Detail:  "metadata backup + scrub stop on shutdown",
+		},
+	}
 }
 
 func NewDaemon(cfg DaemonConfig) *Daemon {
@@ -48,6 +108,9 @@ func (d *Daemon) Alerter() *Alerter   { return d.alerter }
 func (d *Daemon) Logs() *LogBuffer    { return d.logs }
 
 func (d *Daemon) Run(ctx context.Context) {
+	d.mu.Lock()
+	d.startedAt = time.Now()
+	d.mu.Unlock()
 	d.logs.Info("safety daemon started")
 	log.Println("[safety] daemon started")
 
@@ -64,6 +127,9 @@ func (d *Daemon) Run(ctx context.Context) {
 		d.alerter.Send(Alert{Level: AlertWarning, Message: fmt.Sprintf("scrub error on %s: %v", dev, err)})
 	})
 	d.scrub.Start(arrays)
+	d.mu.Lock()
+	d.lastScrubStart = time.Now()
+	d.mu.Unlock()
 
 	// SMART check ticker
 	smartTicker := time.NewTicker(d.cfg.SMARTInterval)
@@ -96,6 +162,7 @@ func (d *Daemon) Run(ctx context.Context) {
 func (d *Daemon) Stop() { close(d.stop) }
 
 func (d *Daemon) checkSMART() {
+	diskCount, errCount := 0, 0
 	pools, _ := d.cfg.MetadataStore.ListPools()
 	for _, ps := range pools {
 		pool, err := d.cfg.MetadataStore.LoadPool(ps.ID)
@@ -107,11 +174,13 @@ func (d *Daemon) checkSMART() {
 				continue
 			}
 			status, err := CheckSMART(disk.Device)
+			diskCount++
 			if err != nil {
 				d.logs.Warn("SMART check failed for %s: %v", disk.Device, err)
 				continue
 			}
 			if !status.Healthy {
+				errCount++
 				d.logs.Error("SMART FAILED on %s: %v", disk.Device, status.Errors)
 				d.alerter.Send(Alert{
 					Level: AlertCritical, Pool: pool.Name, Device: disk.Device,
@@ -128,6 +197,11 @@ func (d *Daemon) checkSMART() {
 			}
 		}
 	}
+	d.mu.Lock()
+	d.lastSMART = time.Now()
+	d.smartDiskCount = diskCount
+	d.smartErrors = errCount
+	d.mu.Unlock()
 }
 
 func (d *Daemon) backupMetadata() {
@@ -144,6 +218,9 @@ func (d *Daemon) backupMetadata() {
 		}
 	}
 	d.updateBootConfig()
+	d.mu.Lock()
+	d.lastBackup = time.Now()
+	d.mu.Unlock()
 }
 
 func (d *Daemon) updateBootConfig() {
@@ -153,6 +230,9 @@ func (d *Daemon) updateBootConfig() {
 			d.logs.Warn("mdadm.conf update failed: %v", err)
 		} else {
 			d.logs.Info("mdadm.conf updated with %d arrays", len(arrays))
+			d.mu.Lock()
+			d.lastBootConfig = time.Now()
+			d.mu.Unlock()
 		}
 	}
 }

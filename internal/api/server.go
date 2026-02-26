@@ -24,10 +24,12 @@ type Server struct {
 	pass    string
 	alerter *safety.Alerter
 	logs    *safety.LogBuffer
+	daemon  *safety.Daemon
 }
 
 func (s *Server) SetAlerter(a *safety.Alerter) { s.alerter = a }
 func (s *Server) SetLogs(l *safety.LogBuffer)   { s.logs = l }
+func (s *Server) SetDaemon(d *safety.Daemon)     { s.daemon = d }
 
 func New(eng engine.EngineService) *Server {
 	return NewWithAuth(eng, "", "")
@@ -59,6 +61,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/preview-create", s.handlePreviewCreate)
 	s.mux.HandleFunc("/api/preview-remove", s.handlePreviewRemove)
 	s.mux.HandleFunc("/api/alerts", s.handleAlerts)
+	s.mux.HandleFunc("/api/safety-status", s.handleSafetyStatus)
+	s.mux.HandleFunc("/api/import", s.handleImport)
 	s.mux.HandleFunc("/api/logs", s.handleLogs)
 
 	sub, _ := fs.Sub(staticFS, "static")
@@ -555,6 +559,29 @@ func (s *Server) handlePreviewRemove(w http.ResponseWriter, r *http.Request) {
 		Safe: safe, CurrentCapacity: currentCap, ProjectedCapacity: projectedCap,
 		LossBytes: loss, Warnings: warnings,
 	})
+}
+
+func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	result, err := s.engine.ImportPool()
+	if err != nil {
+		s.logError("import pool: %v", err)
+		httpError(w, err, http.StatusInternalServerError)
+		return
+	}
+	s.logInfo("pool imported: %s (%d arrays, %d disks remapped)", result.PoolName, result.ArraysFound, result.DisksRemapped)
+	jsonResp(w, result)
+}
+
+func (s *Server) handleSafetyStatus(w http.ResponseWriter, r *http.Request) {
+	if s.daemon == nil {
+		httpError(w, fmt.Errorf("safety daemon not running"), http.StatusServiceUnavailable)
+		return
+	}
+	jsonResp(w, s.daemon.Status())
 }
 
 func (s *Server) handleAlerts(w http.ResponseWriter, r *http.Request) {

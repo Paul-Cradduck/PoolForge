@@ -188,6 +188,25 @@ func main() {
 	removeDiskCmd.MarkFlagRequired("disk")
 	pool.AddCommand(removeDiskCmd)
 
+	// pool import
+	pool.AddCommand(&cobra.Command{
+		Use:   "import",
+		Short: "Import a pool from disks moved from another system",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			result, err := eng.ImportPool()
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Pool imported: %s\n", result.PoolName)
+			fmt.Printf("  ID:              %s\n", result.PoolID)
+			fmt.Printf("  Arrays found:    %d\n", result.ArraysFound)
+			fmt.Printf("  Disks remapped:  %d\n", result.DisksRemapped)
+			fmt.Printf("  Arrays fixed:    %d\n", result.ArraysFixed)
+			fmt.Printf("  Mount point:     %s\n", result.MountPoint)
+			return nil
+		},
+	})
+
 	// pool delete
 	pool.AddCommand(&cobra.Command{
 		Use:   "delete [pool-name]",
@@ -250,6 +269,7 @@ func main() {
 			srv := api.NewWithAuth(eng, serveUser, servePass)
 			srv.SetAlerter(daemon.Alerter())
 			srv.SetLogs(daemon.Logs())
+			srv.SetDaemon(daemon)
 			fmt.Printf("PoolForge web portal: http://%s\n", serveAddr)
 			fmt.Println("Safety daemon: SMART monitoring, scrub scheduling, metadata backup")
 			return http.ListenAndServe(serveAddr, srv)

@@ -103,9 +103,11 @@ td { padding: 8px 12px; border-bottom: 1px solid var(--border); }
 <div class="container">
   <div class="toolbar">
     <button class="primary" onclick="showCreateModal()">+ Create Pool</button>
+    <button onclick="importPool()">📥 Import</button>
     <button onclick="refresh()">↻ Refresh</button>
   </div>
   <div id="pools"></div>
+  <div id="safety"></div>
   <div id="alerts"></div>
   <div id="logs"></div>
 </div>
@@ -640,12 +642,59 @@ async function clearLogs() {
   try { await api('/logs', {method:'DELETE'}); refreshLogs(); } catch(e) {}
 }
 
+async function importPool() {
+  if (!confirm('Scan for and import a PoolForge pool from attached disks?')) return;
+  try {
+    const r = await api('/import', { method: 'POST' });
+    toast(`Imported "${r.PoolName}" — ${r.ArraysFound} arrays, ${r.DisksRemapped} disks remapped`);
+    refresh();
+  } catch(e) { toast(e.message, true); }
+}
+
+async function refreshSafety() {
+  try {
+    const s = await api('/safety-status');
+    const el = document.getElementById('safety');
+    if (!s || !s.running) { el.innerHTML = ''; return; }
+    const ago = (t) => {
+      if (!t || t.startsWith('0001')) return 'never';
+      const sec = Math.floor((Date.now() - new Date(t).getTime()) / 1000);
+      if (sec < 60) return sec + 's ago';
+      if (sec < 3600) return Math.floor(sec/60) + 'm ago';
+      return Math.floor(sec/3600) + 'h ago';
+    };
+    const features = [
+      { icon: '💚', name: 'SMART Monitoring', interval: s.smart.interval, last: s.smart.lastRun, detail: s.smart.detail },
+      { icon: '🔍', name: 'Scrub Scheduler', interval: s.scrub.interval, last: s.scrub.lastRun, detail: s.scrub.detail || 'periodic array check' },
+      { icon: '💾', name: 'Metadata Backup', interval: s.metadataBackup.interval, last: s.metadataBackup.lastRun, detail: s.metadataBackup.detail || 'to pool mount' },
+      { icon: '🔧', name: 'Boot Config', interval: s.bootConfig.interval, last: s.bootConfig.lastRun, detail: s.bootConfig.detail || 'mdadm.conf + initramfs' },
+      { icon: '🛡️', name: 'Graceful Shutdown', interval: s.gracefulShutdown.interval, last: null, detail: s.gracefulShutdown.detail },
+    ];
+    el.innerHTML = `<div class="card"><h2>🛡️ Safety Daemon</h2>
+      <div style="display:flex;gap:8px;margin-bottom:12px;font-size:13px">
+        <span style="color:var(--green)">● Running</span>
+        <span style="color:var(--muted)">Uptime: ${s.uptime}</span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px">
+        ${features.map(f => `<div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px">
+          <div style="font-weight:600;margin-bottom:4px">${f.icon} ${f.name}</div>
+          <div style="font-size:12px;color:var(--muted)">Every ${f.interval}</div>
+          ${f.last ? `<div style="font-size:12px;color:var(--green)">Last: ${ago(f.last)}</div>` : ''}
+          ${f.detail ? `<div style="font-size:11px;color:var(--muted);margin-top:2px">${f.detail}</div>` : ''}
+        </div>`).join('')}
+      </div>
+    </div>`;
+  } catch(e) {}
+}
+
 // Initial load
 refresh();
 refreshAlerts();
 refreshLogs();
+refreshSafety();
 setInterval(refreshAlerts, 15000);
 setInterval(refreshLogs, 10000);
+setInterval(refreshSafety, 15000);
 // Auto-refresh every 10s (5s when rebuilding)
 let refreshInterval = setInterval(refresh, 10000);
 
