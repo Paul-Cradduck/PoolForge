@@ -80,6 +80,8 @@ td { padding: 8px 12px; border-bottom: 1px solid var(--border); }
 .disk-chip:hover { border-color: var(--accent); }
 .disk-chip.selected { border-color: var(--accent); background: rgba(59,130,246,0.15); }
 
+.disk-chip.in-use { opacity: 0.4; cursor: not-allowed; border-color: var(--border); }
+
 .empty { text-align: center; padding: 48px; color: var(--muted); }
 .toast {
   position: fixed; bottom: 24px; right: 24px; padding: 12px 20px;
@@ -181,6 +183,10 @@ async function refresh() {
   } catch (e) { toast(e.message, true); }
 }
 
+function fmtParity(mode) {
+  return mode === 1 ? 'SHR-2' : 'SHR-1';
+}
+
 function renderPool(summary, status) {
   const pool = status.Pool;
   const arrays = status.ArrayStatuses || [];
@@ -210,7 +216,9 @@ function renderPool(summary, status) {
       <button class="danger" onclick="deletePool('${pool.ID}','${pool.Name}')">✕ Delete</button>
     </h2>
     <div style="font-size:12px;color:var(--muted);margin-bottom:12px">
-      ID: ${pool.ID} &nbsp;|&nbsp; Mount: ${pool.MountPoint} &nbsp;|&nbsp; VG: ${pool.VolumeGroup}
+      ID: ${pool.ID} &nbsp;|&nbsp; ${fmtParity(pool.ParityMode)} &nbsp;|&nbsp;
+      ${fmtBytes(summary.TotalCapacityBytes)} total, ${fmtBytes(summary.UsedCapacityBytes)} used &nbsp;|&nbsp;
+      Mount: ${pool.MountPoint}
     </div>
     <div id="rebuild-${pool.ID}"></div>
     <h3 style="font-size:13px;margin:12px 0 6px">Arrays</h3>
@@ -224,9 +232,11 @@ function renderPool(summary, status) {
 async function showCreateModal() {
   try { availableDisks = await api('/disks'); } catch(e) { availableDisks = []; }
   const el = document.getElementById('diskSelect');
-  el.innerHTML = availableDisks.map(d =>
-    `<div class="disk-chip" data-dev="${d.device}" onclick="this.classList.toggle('selected')">${d.device} (${d.sizeGB.toFixed(1)}G)</div>`
-  ).join('') || '<span style="color:var(--muted)">No available disks found</span>';
+  el.innerHTML = availableDisks.map(d => {
+    const cls = d.inUse ? 'disk-chip in-use' : 'disk-chip';
+    const label = d.inUse ? `${d.device} (${d.sizeGB.toFixed(1)}G) [${d.pool}]` : `${d.device} (${d.sizeGB.toFixed(1)}G)`;
+    return `<div class="${cls}" data-dev="${d.device}" ${d.inUse ? '' : `onclick="this.classList.toggle('selected')"`}>${label}</div>`;
+  }).join('') || '<span style="color:var(--muted)">No available disks found</span>';
   document.getElementById('createModal').classList.add('active');
 }
 
@@ -299,13 +309,15 @@ function watchRebuild(poolID) {
   el.innerHTML = '<div style="font-size:12px;color:var(--muted)">Watching rebuild...</div>';
   const es = new EventSource(API + '/pools/' + poolID + '/rebuild');
   es.onmessage = (e) => {
-    const status = JSON.parse(e.data);
-    const arrays = status.ArrayStatuses || [];
+    const evt = JSON.parse(e.data);
+    const arrays = evt.pool.ArrayStatuses || [];
+    const progress = evt.progress || {};
     let html = '';
     for (const a of arrays) {
       if (a.State === 'rebuilding') {
-        html += `<div style="margin:4px 0;font-size:12px">${a.Device} rebuilding...
-          <div class="progress-bar"><div class="fill" style="width:0%"></div></div></div>`;
+        const pct = (progress[a.Device] || 0).toFixed(1);
+        html += `<div style="margin:4px 0;font-size:12px">${a.Device} rebuilding — ${pct}%
+          <div class="progress-bar"><div class="fill" style="width:${pct}%"></div></div></div>`;
       }
     }
     if (html) el.innerHTML = html; else el.innerHTML = '<div style="font-size:12px;color:var(--green)">✓ Rebuild complete</div>';

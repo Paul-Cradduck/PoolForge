@@ -48,6 +48,9 @@ func (s *Server) handlePools(w http.ResponseWriter, r *http.Request) {
 			httpError(w, err, http.StatusInternalServerError)
 			return
 		}
+		if pools == nil {
+			pools = []engine.PoolSummary{}
+		}
 		jsonResp(w, pools)
 	case http.MethodPost:
 		var req struct {
@@ -211,6 +214,11 @@ func (s *Server) handleRebuildSSE(w http.ResponseWriter, r *http.Request, poolID
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
+	type rebuildEvent struct {
+		Pool     *engine.PoolStatus    `json:"pool"`
+		Progress map[string]float64    `json:"progress"`
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -222,17 +230,23 @@ func (s *Server) handleRebuildSSE(w http.ResponseWriter, r *http.Request, poolID
 				flusher.Flush()
 				return
 			}
-			data, _ := json.Marshal(status)
-			fmt.Fprintf(w, "data: %s\n\n", data)
-			flusher.Flush()
 
-			// Stop if no arrays are rebuilding
+			progress := map[string]float64{}
 			rebuilding := false
 			for _, a := range status.ArrayStatuses {
 				if a.State == engine.ArrayRebuilding {
 					rebuilding = true
+					if rp, err := s.engine.GetRebuildProgress(context.Background(), poolID, a.Device); err == nil {
+						progress[a.Device] = rp.PercentComplete
+					}
 				}
 			}
+
+			evt := rebuildEvent{Pool: status, Progress: progress}
+			data, _ := json.Marshal(evt)
+			fmt.Fprintf(w, "data: %s\n\n", data)
+			flusher.Flush()
+
 			if !rebuilding {
 				fmt.Fprintf(w, "event: done\ndata: complete\n\n")
 				flusher.Flush()
@@ -247,11 +261,25 @@ func (s *Server) handleDisks(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
-	// List block devices from /sys/block
 	type blockDev struct {
 		Device string `json:"device"`
 		SizeGB float64 `json:"sizeGB"`
+		InUse  bool   `json:"inUse"`
+		Pool   string `json:"pool,omitempty"`
 	}
+
+	// Build set of in-use devices
+	used := map[string]string{}
+	if pools, err := s.engine.ListPools(r.Context()); err == nil {
+		for _, p := range pools {
+			if status, err := s.engine.GetPoolStatus(r.Context(), p.ID); err == nil {
+				for _, d := range status.DiskStatuses {
+					used[d.Device] = p.Name
+				}
+			}
+		}
+	}
+
 	entries, err := fs.ReadDir(sysFS, ".")
 	if err != nil {
 		jsonResp(w, []blockDev{})
@@ -263,16 +291,20 @@ func (s *Server) handleDisks(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasPrefix(name, "nvme") && !strings.HasPrefix(name, "sd") {
 			continue
 		}
-		if strings.Contains(name, "p") { // skip partitions like nvme0n1p1
+		if strings.Contains(name, "p") {
 			continue
 		}
-		if name == "nvme0n1" { // skip root
+		if name == "nvme0n1" {
 			continue
 		}
+		dev := "/dev/" + name
 		sizeBytes := readSysBlockSize(name)
+		poolName := used[dev]
 		devs = append(devs, blockDev{
-			Device: "/dev/" + name,
+			Device: dev,
 			SizeGB: float64(sizeBytes) / (1024 * 1024 * 1024),
+			InUse:  poolName != "",
+			Pool:   poolName,
 		})
 	}
 	jsonResp(w, devs)
