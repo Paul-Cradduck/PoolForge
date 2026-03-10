@@ -735,6 +735,7 @@ func (s *Server) handleStartPool(w http.ResponseWriter, r *http.Request, poolNam
 	force := r.URL.Query().Get("force") == "true"
 	result, err := s.engine.StartPool(r.Context(), poolNameOrID, force)
 	if err != nil {
+		s.logError("pool '%s' start failed: %v", poolNameOrID, err)
 		msg := err.Error()
 		if strings.Contains(msg, "not found") {
 			httpError(w, err, http.StatusNotFound)
@@ -790,6 +791,7 @@ func (s *Server) handleStopPool(w http.ResponseWriter, r *http.Request, poolName
 	}
 	err := s.engine.StopPool(r.Context(), poolNameOrID)
 	if err != nil {
+		s.logError("pool '%s' stop failed: %v", poolNameOrID, err)
 		msg := err.Error()
 		if strings.Contains(msg, "not found") {
 			httpError(w, err, http.StatusNotFound)
