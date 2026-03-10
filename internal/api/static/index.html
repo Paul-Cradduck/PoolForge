@@ -261,8 +261,8 @@ function renderPool(summary, status) {
   });
   sliceMapHTML += '</div>';
 
-  const isExternal = pool.IsExternal || false;
-  const opStatus = pool.OperationalStatus || 'running';
+  const isExternal = pool.is_external || pool.IsExternal || false;
+  const opStatus = pool.operational_status || pool.OperationalStatus || 'running';
   const opBadge = opStatus === 'running' ? badge('running') : opStatus === 'safe_to_power_down' ? badge('safe_to_power_down') : badge('offline');
 
   return `
