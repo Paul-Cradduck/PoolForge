@@ -217,13 +217,50 @@ func (e *engineImpl) resolvePoolByName(name string) (*Pool, error) {
 
 // countDetectedDrives counts how many of the pool's expected drives are currently visible.
 func (e *engineImpl) countDetectedDrives(pool *Pool) int {
+	// Match pool disks by capacity against all block devices,
+	// not by device path, since paths change after power cycles.
+	entries, err := os.ReadDir("/sys/block")
+	if err != nil {
+		return 0
+	}
+	type avail struct {
+		cap  int64
+		used bool
+	}
+	var avails []avail
+	for _, ent := range entries {
+		name := ent.Name()
+		if strings.HasPrefix(name, "loop") || strings.HasPrefix(name, "dm-") || strings.HasPrefix(name, "md") || strings.HasPrefix(name, "ram") {
+			continue
+		}
+		sizeBytes, err := os.ReadFile("/sys/block/" + name + "/size")
+		if err != nil {
+			continue
+		}
+		sectors := strings.TrimSpace(string(sizeBytes))
+		var s int64
+		fmt.Sscanf(sectors, "%d", &s)
+		avails = append(avails, avail{cap: s * 512})
+	}
+	const tolerance int64 = 50 * 1024 * 1024 // 50MB
 	count := 0
 	for _, d := range pool.Disks {
-		if info, err := e.disk.GetDiskInfo(d.Device); err == nil && info.CapacityBytes > 0 {
-			count++
+		for i := range avails {
+			if !avails[i].used && abs64(avails[i].cap-int64(d.CapacityBytes)) <= tolerance {
+				avails[i].used = true
+				count++
+				break
+			}
 		}
 	}
 	return count
+}
+
+func abs64(x int64) int64 {
+	if x < 0 {
+		return -x
+	}
+	return x
 }
 
 // reconcileDeviceNames updates all disk/partition device paths from mdadm --detail.
