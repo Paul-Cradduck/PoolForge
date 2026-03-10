@@ -49,6 +49,7 @@ button.danger:hover { background: var(--red); color: #fff; }
 .badge.rebuilding { background: rgba(59,130,246,0.15); color: var(--accent); }
 .badge.expanding { background: rgba(59,130,246,0.15); color: var(--accent); }
 .badge.offline { background: rgba(156,163,175,0.15); color: #9ca3af; }
+.badge.stopped { background: rgba(156,163,175,0.15); color: #9ca3af; }
 .badge.safe_to_power_down { background: rgba(59,130,246,0.15); color: var(--accent); }
 .badge.running { background: rgba(34,197,94,0.15); color: var(--green); }
 .external-warning { background: rgba(234,179,8,0.1); border: 1px solid rgba(234,179,8,0.3); border-radius: var(--radius); padding: 8px 12px; font-size: 12px; color: var(--yellow); margin-bottom: 12px; }
@@ -263,7 +264,7 @@ function renderPool(summary, status) {
 
   const isExternal = pool.is_external || pool.IsExternal || false;
   const opStatus = pool.operational_status || pool.OperationalStatus || 'running';
-  const opBadge = opStatus === 'running' ? badge('running') : opStatus === 'safe_to_power_down' ? badge('safe_to_power_down') : badge('offline');
+  const opBadge = opStatus === 'running' ? badge('running') : badge('stopped');
 
   return `
   <div class="card">
