@@ -52,7 +52,12 @@ func GenerateBootConfig(pools []PoolBootInfo) error {
 	if err := os.MkdirAll("/etc/mdadm", 0755); err != nil {
 		return err
 	}
-	if err := os.WriteFile("/etc/mdadm/mdadm.conf", []byte(content), 0644); err != nil {
+	path := "/etc/mdadm/mdadm.conf"
+	existing, _ := os.ReadFile(path)
+	if string(existing) == content {
+		return nil // no change, skip expensive update-initramfs
+	}
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		return err
 	}
 	if err := exec.Command("update-initramfs", "-u").Run(); err != nil {
