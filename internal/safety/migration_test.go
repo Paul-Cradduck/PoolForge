@@ -150,11 +150,13 @@ func TestMigrationSkipsAlreadyMigrated(t *testing.T) {
 }
 
 func TestBootPoolsAutoStartVsManualStart(t *testing.T) {
+	// Auto-start pool with no active arrays → should be offline
 	autoPool := &engine.Pool{
 		ID: "auto-1", Name: "internal", ParityMode: engine.Parity1,
 		State: engine.PoolHealthy, OperationalStatus: engine.PoolRunning,
 		RequiresManualStart: false,
-		Disks: []engine.DiskInfo{{Device: "/dev/sda", CapacityBytes: 1e9, State: engine.DiskHealthy}},
+		Disks:      []engine.DiskInfo{{Device: "/dev/sda", CapacityBytes: 1e9, State: engine.DiskHealthy}},
+		RAIDArrays: []engine.RAIDArray{{Device: "/dev/md_nonexistent"}},
 	}
 	manualPool := &engine.Pool{
 		ID: "manual-1", Name: "external", ParityMode: engine.Parity1,
@@ -174,9 +176,9 @@ func TestBootPoolsAutoStartVsManualStart(t *testing.T) {
 
 	d.bootPools()
 
-	// Auto-start pool should remain Running
-	if meta.pools["auto-1"].OperationalStatus != engine.PoolRunning {
-		t.Error("auto-start pool should be Running")
+	// No active arrays → should be offline
+	if meta.pools["auto-1"].OperationalStatus != engine.PoolOffline {
+		t.Errorf("auto-start pool with no active arrays should be Offline, got %s", meta.pools["auto-1"].OperationalStatus)
 	}
 	// Manual-start pool should be set to Offline
 	if meta.pools["manual-1"].OperationalStatus != engine.PoolOffline {

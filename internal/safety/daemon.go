@@ -305,10 +305,21 @@ func (d *Daemon) bootPools() {
 			d.cfg.MetadataStore.SavePool(pool)
 			d.logs.Info("pool %s: skipped (manual start required)", pool.Name)
 		} else {
-			d.logs.Info("pool %s: auto-start (internal pool)", pool.Name)
-			// Internal pools are already assembled by the system — just ensure status is Running
-			pool.OperationalStatus = engine.PoolRunning
+			// Check if arrays are actually active before marking as running
+			active := false
+			for _, a := range pool.RAIDArrays {
+				if _, err := os.Stat(a.Device); err == nil {
+					active = true
+					break
+				}
+			}
+			if active {
+				pool.OperationalStatus = engine.PoolRunning
+			} else {
+				pool.OperationalStatus = engine.PoolOffline
+			}
 			d.cfg.MetadataStore.SavePool(pool)
+			d.logs.Info("pool %s: status=%s", pool.Name, pool.OperationalStatus)
 		}
 	}
 }
