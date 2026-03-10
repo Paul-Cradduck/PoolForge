@@ -42,10 +42,18 @@ func (e *engineImpl) StartPool(ctx context.Context, poolName string, force bool)
 	for _, arr := range arrays {
 		ar := ArrayStartResult{Device: arr.Device, TierIndex: arr.TierIndex}
 
-		// Assemble by UUID
-		_, err := e.raid.AssembleArrayBySuperblock(arr.UUID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to assemble %s (UUID %s): %w", arr.Device, arr.UUID, err)
+		// Assemble by UUID if available, otherwise by device name + members
+		if arr.UUID != "" {
+			_, err := e.raid.AssembleArrayBySuperblock(arr.UUID)
+			if err != nil {
+				return nil, fmt.Errorf("failed to assemble %s (UUID %s): %w", arr.Device, arr.UUID, err)
+			}
+		} else {
+			members := make([]string, len(arr.Members))
+			copy(members, arr.Members)
+			if err := e.raid.AssembleArray(arr.Device, members); err != nil {
+				return nil, fmt.Errorf("failed to assemble %s by members: %w", arr.Device, err)
+			}
 		}
 
 		// Check if degraded and attempt repair
@@ -100,6 +108,15 @@ func (e *engineImpl) StartPool(ctx context.Context, poolName string, force bool)
 
 	// Reconcile ALL device names from mdadm --detail
 	e.reconcileDeviceNames(pool)
+
+	// Populate UUIDs if missing (first start after upgrade)
+	for i, arr := range pool.RAIDArrays {
+		if arr.UUID == "" {
+			if uuid, err := e.raid.GetArrayUUID(arr.Device); err == nil && uuid != "" {
+				pool.RAIDArrays[i].UUID = uuid
+			}
+		}
+	}
 
 	// Update metadata
 	now := time.Now()
