@@ -6,100 +6,152 @@
 <title>PoolForge</title>
 <style>
 :root {
-  --bg: #0f1117; --surface: #1a1d27; --border: #2a2d3a;
-  --text: #e4e4e7; --muted: #71717a; --accent: #3b82f6;
-  --green: #22c55e; --yellow: #eab308; --red: #ef4444;
-  --radius: 8px;
+  --primary: rgba(125,201,3,1); --primary-hover: rgba(145,234,3,1);
+  --secondary: rgba(108,140,227,1); --secondary-hover: rgba(147,176,255,1);
+  --accent: rgba(255,102,78,1); --accent-hover: rgba(255,144,126,1);
+  --bg: rgba(32,32,32,1); --surface: rgba(43,43,43,1); --surface-deep: rgba(20,20,20,1);
+  --border: rgba(134,134,134,0.333); --border-light: rgba(134,134,134,0.125);
+  --text: rgba(224,224,224,1); --text-bright: rgba(255,255,255,1); --muted: rgba(186,186,186,1);
+  --green: rgba(130,229,80,1); --yellow: rgba(237,153,9,1); --red: rgba(224,62,62,1);
+  --blue: rgba(48,117,229,1); --cyan: rgba(30,190,190,1);
+  --code-bg: rgba(45,45,45,1);
 }
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
-a { color: var(--accent); text-decoration: none; }
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  background: var(--bg); color: var(--text); min-height: 100vh;
+  font-weight: 300; letter-spacing: 0.014em; line-height: 1.574;
+}
+a { color: var(--secondary); text-decoration: none; }
+a:hover { color: var(--secondary-hover); text-decoration: underline; }
 
-.header { padding: 16px 24px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; }
-.header h1 { font-size: 20px; font-weight: 600; }
-.header .logo { width: 28px; height: 28px; background: var(--accent); border-radius: 6px; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; }
+.header {
+  padding: 0 1.5rem; min-height: 3rem; display: flex; align-items: center; gap: 0.75rem;
+  background: color-mix(in srgb, var(--bg), rgba(134,134,134,0.133));
+  border-bottom: 1px solid var(--border);
+}
+.header h1 { font-size: 1.1rem; font-weight: 500; color: var(--text-bright); letter-spacing: 0.02em; }
+.header .logo {
+  width: 1.75rem; height: 1.75rem; background: var(--primary); border-radius: 4px;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: 0.85rem; color: rgba(32,32,32,1);
+}
 
-.container { max-width: 1100px; margin: 0 auto; padding: 24px; }
+.container { max-width: 72rem; margin: 0 auto; padding: 1.5rem; }
 
-.toolbar { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
+.toolbar { display: flex; gap: 0.5rem; margin-bottom: 1.25rem; flex-wrap: wrap; }
 
 button, .btn {
-  padding: 8px 16px; border: 1px solid var(--border); border-radius: var(--radius);
-  background: var(--surface); color: var(--text); cursor: pointer; font-size: 13px;
-  transition: border-color 0.15s;
+  padding: 0.4em 0.6em; border: 1px solid var(--border); border-radius: 4px;
+  background: transparent; color: var(--text); cursor: pointer;
+  font-size: 0.9em; font-weight: 500; transition: all 0.35s ease;
+  letter-spacing: 0.014em;
 }
-button:hover, .btn:hover { border-color: var(--accent); }
-button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button:hover, .btn:hover { border-color: var(--primary); color: var(--text-bright); }
+button.primary { background: var(--primary); border-color: var(--primary); color: rgba(20,20,20,1); font-weight: 600; }
+button.primary:hover { background: var(--primary-hover); border-color: var(--primary-hover); }
 button.danger { border-color: var(--red); color: var(--red); }
-button.danger:hover { background: var(--red); color: #fff; }
+button.danger:hover { background: var(--red); color: var(--text-bright); }
 
 .card {
-  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-  padding: 20px; margin-bottom: 16px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 12px; padding: 1.25rem; margin-bottom: 1rem;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3); transition: all 0.35s ease;
 }
-.card h2 { font-size: 16px; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+.card h2 {
+  font-size: 1rem; font-weight: 500; margin-bottom: 0.75rem;
+  display: flex; align-items: center; gap: 0.5rem; color: var(--text-bright);
+  flex-wrap: wrap;
+}
+.card h3 { font-size: 0.85rem; font-weight: 500; color: var(--muted); margin: 0.75rem 0 0.4rem; }
 
 .badge {
-  display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px;
-  font-weight: 600; text-transform: uppercase;
+  display: inline-block; padding: 0 0.25rem; border-radius: 3px;
+  font-size: 0.8rem; font-weight: 500; border: 1px solid;
 }
-.badge.healthy { background: rgba(34,197,94,0.15); color: var(--green); }
-.badge.degraded { background: rgba(234,179,8,0.15); color: var(--yellow); }
-.badge.failed { background: rgba(239,68,68,0.15); color: var(--red); }
-.badge.rebuilding { background: rgba(59,130,246,0.15); color: var(--accent); }
-.badge.expanding { background: rgba(59,130,246,0.15); color: var(--accent); }
-.badge.offline { background: rgba(156,163,175,0.15); color: #9ca3af; }
-.badge.stopped { background: rgba(156,163,175,0.15); color: #9ca3af; }
-.badge.safe_to_power_down { background: rgba(59,130,246,0.15); color: var(--accent); }
-.badge.running { background: rgba(34,197,94,0.15); color: var(--green); }
-.external-warning { background: rgba(234,179,8,0.1); border: 1px solid rgba(234,179,8,0.3); border-radius: var(--radius); padding: 8px 12px; font-size: 12px; color: var(--yellow); margin-bottom: 12px; }
-.start-stop-btn { padding: 6px 14px; border-radius: var(--radius); font-size: 12px; font-weight: 600; cursor: pointer; border: none; }
-.start-stop-btn.start { background: var(--green); color: #fff; }
-.start-stop-btn.stop { background: var(--red); color: #fff; }
-.safe-power-down { background: rgba(34,197,94,0.1); border: 1px solid rgba(34,197,94,0.3); border-radius: var(--radius); padding: 12px 16px; color: var(--green); margin: 12px 0; font-weight: 600; }
+.badge.healthy { background: rgba(130,229,80,0.12); color: var(--green); border-color: rgba(130,229,80,0.3); }
+.badge.degraded { background: rgba(237,153,9,0.12); color: var(--yellow); border-color: rgba(237,153,9,0.3); }
+.badge.failed { background: rgba(224,62,62,0.12); color: var(--red); border-color: rgba(224,62,62,0.3); }
+.badge.rebuilding { background: rgba(108,140,227,0.12); color: var(--secondary); border-color: rgba(108,140,227,0.3); }
+.badge.expanding { background: rgba(108,140,227,0.12); color: var(--secondary); border-color: rgba(108,140,227,0.3); }
+.badge.offline { background: rgba(134,134,134,0.12); color: var(--muted); border-color: rgba(134,134,134,0.3); }
+.badge.stopped { background: rgba(134,134,134,0.12); color: var(--muted); border-color: rgba(134,134,134,0.3); }
+.badge.safe_to_power_down { background: rgba(108,140,227,0.12); color: var(--secondary); border-color: rgba(108,140,227,0.3); }
+.badge.running { background: rgba(130,229,80,0.12); color: var(--green); border-color: rgba(130,229,80,0.3); }
 
-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-th { text-align: left; color: var(--muted); font-weight: 500; padding: 8px 12px; border-bottom: 1px solid var(--border); }
-td { padding: 8px 12px; border-bottom: 1px solid var(--border); }
+.external-warning {
+  background: rgba(237,153,9,0.08); border: 1px solid rgba(237,153,9,0.25);
+  border-radius: 4px; padding: 0.5rem 0.75rem; font-size: 0.85rem; color: var(--yellow); margin-bottom: 0.75rem;
+}
+.start-stop-btn {
+  padding: 0.3em 0.7em; border-radius: 4px; font-size: 0.8rem; font-weight: 600;
+  cursor: pointer; border: 1px solid; transition: all 0.35s ease;
+}
+.start-stop-btn.start { background: rgba(130,229,80,0.15); color: var(--green); border-color: rgba(130,229,80,0.4); }
+.start-stop-btn.start:hover { background: var(--green); color: rgba(20,20,20,1); }
+.start-stop-btn.stop { background: rgba(224,62,62,0.15); color: var(--red); border-color: rgba(224,62,62,0.4); }
+.start-stop-btn.stop:hover { background: var(--red); color: var(--text-bright); }
+
+table {
+  width: 100%; border-collapse: collapse; font-size: 0.85rem;
+  background: var(--surface); border: 1px solid var(--border); margin: 0.5rem 0;
+}
+th {
+  text-align: left; color: var(--text-bright); font-weight: 500;
+  padding: 0.5rem 0.75rem; background: rgba(134,134,134,0.166);
+  border: 1px solid var(--border);
+}
+td { padding: 0.5rem 0.75rem; border: 1px solid var(--border); }
+tbody tr:nth-child(even) td { background: rgba(134,134,134,0.045); }
 
 .progress-bar { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
-.progress-bar .fill { height: 100%; background: var(--accent); border-radius: 3px; transition: width 0.5s; }
+.progress-bar .fill { height: 100%; background: var(--primary); border-radius: 3px; transition: width 0.5s; }
 
 .modal-overlay {
-  display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+  display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7);
   z-index: 100; align-items: center; justify-content: center;
 }
 .modal-overlay.active { display: flex; }
 .modal {
-  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-  padding: 24px; min-width: 400px; max-width: 500px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+  padding: 1.5rem; min-width: 400px; max-width: 500px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
 }
-.modal h3 { margin-bottom: 16px; }
-.modal label { display: block; color: var(--muted); font-size: 12px; margin-bottom: 4px; margin-top: 12px; }
+.modal h3 { margin-bottom: 1rem; font-weight: 500; color: var(--text-bright); font-size: 1.1rem; }
+.modal label { display: block; color: var(--muted); font-size: 0.8rem; margin-bottom: 0.25rem; margin-top: 0.75rem; font-weight: 500; }
 .modal input, .modal select {
-  width: 100%; padding: 8px 10px; background: var(--bg); border: 1px solid var(--border);
-  border-radius: var(--radius); color: var(--text); font-size: 13px;
+  width: 100%; padding: 0.5rem 0.6rem; background: var(--surface-deep); border: 1px solid var(--border);
+  border-radius: 4px; color: var(--text); font-size: 0.9rem; transition: border-color 0.35s ease;
 }
-.modal .actions { margin-top: 20px; display: flex; gap: 8px; justify-content: flex-end; }
+.modal input:focus, .modal select:focus { border-color: var(--primary); outline: none; }
+.modal .actions { margin-top: 1.25rem; display: flex; gap: 0.5rem; justify-content: flex-end; }
 
-.disk-select { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.disk-select { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.5rem; }
 .disk-chip {
-  padding: 6px 12px; border: 1px solid var(--border); border-radius: var(--radius);
-  cursor: pointer; font-size: 12px; transition: all 0.15s;
+  padding: 0.35rem 0.7rem; border: 1px solid var(--border); border-radius: 4px;
+  cursor: pointer; font-size: 0.8rem; transition: all 0.35s ease; font-weight: 500;
 }
-.disk-chip:hover { border-color: var(--accent); }
-.disk-chip.selected { border-color: var(--accent); background: rgba(59,130,246,0.15); }
+.disk-chip:hover { border-color: var(--primary); color: var(--text-bright); }
+.disk-chip.selected { border-color: var(--primary); background: rgba(125,201,3,0.12); color: var(--green); }
+.disk-chip.in-use { opacity: 0.35; cursor: not-allowed; }
 
-.disk-chip.in-use { opacity: 0.4; cursor: not-allowed; border-color: var(--border); }
+.empty { text-align: center; padding: 3rem; color: var(--muted); font-weight: 300; }
 
-.empty { text-align: center; padding: 48px; color: var(--muted); }
 .toast {
-  position: fixed; bottom: 24px; right: 24px; padding: 12px 20px;
-  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-  font-size: 13px; z-index: 200; opacity: 0; transition: opacity 0.3s;
+  position: fixed; bottom: 2rem; left: 50%; transform: translateX(-50%) translateY(1rem);
+  padding: 0.75rem 1.25rem; background: var(--primary); border-radius: 4px;
+  font-size: 0.875rem; font-weight: 500; color: rgba(20,20,20,1);
+  z-index: 200; opacity: 0; transition: all 0.3s ease; pointer-events: none;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3); max-width: 90vw; text-align: center;
 }
-.toast.show { opacity: 1; }
-.toast.error { border-color: var(--red); }
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); pointer-events: auto; }
+.toast.error { background: var(--red); color: var(--text-bright); }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(208,208,208,0.3); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(204,204,204,0.5); }
 </style>
 </head>
 <body>
@@ -130,9 +182,9 @@ td { padding: 8px 12px; border-bottom: 1px solid var(--border); }
     <label>Parity Mode</label>
     <select id="parityMode"><option value="parity1">Single Parity (1-disk fault tolerance)</option><option value="parity2">Dual Parity (2-disk fault tolerance)</option></select>
     <label>Select Disks (min 2)</label>
-    <div style="margin-bottom:6px"><button onclick="autoSelectDisks()" style="font-size:11px;padding:4px 10px">⚡ Auto-select all (optimal)</button></div>
+    <div style="margin-bottom:6px"><button onclick="autoSelectDisks()" style="font-size:0.75rem;padding:0.2em 0.5em">⚡ Auto-select all</button></div>
     <div class="disk-select" id="diskSelect"></div>
-    <div id="createPreview" style="margin-top:12px"></div>
+    <div id="createPreview" style="margin-top:0.75rem"></div>
     <div class="actions">
       <button onclick="closeModal('createModal')">Cancel</button>
       <button class="primary" onclick="createPool()">Create</button>
@@ -140,7 +192,7 @@ td { padding: 8px 12px; border-bottom: 1px solid var(--border); }
   </div>
 </div>
 
-<!-- Action Modal (add/replace/fail) -->
+<!-- Action Modal -->
 <div class="modal-overlay" id="actionModal">
   <div class="modal">
     <h3 id="actionTitle">Action</h3>
@@ -212,24 +264,22 @@ function renderPool(summary, status) {
   let arrayRows = arrays.map(a =>
     `<tr><td>${a.Device}</td><td>RAID${a.RAIDLevel}</td><td>Tier ${a.TierIndex}</td>
      <td>${badge(a.State)}</td><td>${fmtBytes(a.CapacityBytes)}</td>
-     <td style="font-size:11px;color:var(--muted)">${(a.Members||[]).join(', ')}</td></tr>`
+     <td style="font-size:0.75rem;color:var(--muted)">${(a.Members||[]).join(', ')}</td></tr>`
   ).join('');
 
   let diskRows = disks.map(d =>
     `<tr><td>${d.Device}</td><td>${fmtBytes(d.CapacityBytes)}</td><td>${badge(d.State)}</td>
-     <td style="font-size:11px;color:var(--muted)">${(d.ContributingArrays||[]).join(', ')}</td></tr>`
+     <td style="font-size:0.75rem;color:var(--muted)">${(d.ContributingArrays||[]).join(', ')}</td></tr>`
   ).join('');
 
   const rebuilding = arrays.some(a => a.State === 'rebuilding');
 
-  // Build slice visualization
-  const tierColors = ['#3b82f6','#8b5cf6','#ec4899','#f59e0b','#10b981','#ef4444'];
+  const tierColors = ['var(--secondary)','rgba(154,111,255,1)','rgba(243,0,178,1)','var(--yellow)','var(--cyan)','var(--accent)'];
   const poolDisks = pool.Disks || [];
   const maxCap = Math.max(...poolDisks.map(d => d.CapacityBytes || 0), 1);
-  let sliceMapHTML = '<div style="margin:12px 0">';
-  sliceMapHTML += '<h3 style="font-size:13px;margin-bottom:8px">Disk Layout</h3>';
-  // Legend
-  sliceMapHTML += '<div style="display:flex;gap:12px;margin-bottom:8px;font-size:11px">';
+  let sliceMapHTML = '<div style="margin:0.75rem 0">';
+  sliceMapHTML += '<h3>Disk Layout</h3>';
+  sliceMapHTML += '<div style="display:flex;gap:0.75rem;margin-bottom:0.5rem;font-size:0.75rem">';
   const tierSet = new Set();
   poolDisks.forEach(d => (d.Slices||[]).forEach(s => tierSet.add(s.TierIndex)));
   [...tierSet].sort().forEach(ti => {
@@ -238,25 +288,24 @@ function renderPool(summary, status) {
     sliceMapHTML += `<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${tierColors[ti%tierColors.length]};margin-right:4px;vertical-align:middle"></span>${label}</span>`;
   });
   sliceMapHTML += '</div>';
-  // Bars
   poolDisks.forEach(d => {
     const w = ((d.CapacityBytes||0) / maxCap * 100);
-    sliceMapHTML += `<div style="display:flex;align-items:center;margin:3px 0;gap:8px">`;
-    sliceMapHTML += `<div style="width:90px;font-size:11px;text-align:right;flex-shrink:0;color:${d.State==='failed'?'var(--red)':'var(--text)'}">${d.Device.replace('/dev/','')}<br><span style="color:var(--muted)">${fmtBytes(d.CapacityBytes)}</span></div>`;
-    sliceMapHTML += `<div style="flex:1;display:flex;height:24px;border-radius:4px;overflow:hidden;background:var(--border);max-width:${w}%">`;
+    sliceMapHTML += `<div style="display:flex;align-items:center;margin:3px 0;gap:0.5rem">`;
+    sliceMapHTML += `<div style="width:5.5rem;font-size:0.75rem;text-align:right;flex-shrink:0;color:${d.State==='failed'?'var(--red)':'var(--text)'}">${d.Device.replace('/dev/','')}<br><span style="color:var(--muted)">${fmtBytes(d.CapacityBytes)}</span></div>`;
+    sliceMapHTML += `<div style="flex:1;display:flex;height:1.5rem;border-radius:3px;overflow:hidden;background:rgba(134,134,134,0.12);max-width:${w}%">`;
     const slices = (d.Slices||[]).sort((a,b) => a.TierIndex - b.TierIndex);
     const totalSlice = slices.reduce((s,sl) => s + (sl.SizeBytes||0), 0);
     const diskCap = d.CapacityBytes || totalSlice;
     slices.forEach(sl => {
       const pct = diskCap > 0 ? (sl.SizeBytes / diskCap * 100) : 0;
       const color = tierColors[sl.TierIndex % tierColors.length];
-      const opacity = d.State === 'failed' ? '0.3' : '1';
-      sliceMapHTML += `<div style="width:${pct}%;background:${color};opacity:${opacity};display:flex;align-items:center;justify-content:center;font-size:9px;color:#fff;font-weight:600" title="Tier ${sl.TierIndex}: ${fmtBytes(sl.SizeBytes)}">T${sl.TierIndex}</div>`;
+      const opacity = d.State === 'failed' ? '0.3' : '0.85';
+      sliceMapHTML += `<div style="width:${pct}%;background:${color};opacity:${opacity};display:flex;align-items:center;justify-content:center;font-size:0.6rem;color:#fff;font-weight:600" title="Tier ${sl.TierIndex}: ${fmtBytes(sl.SizeBytes)}">T${sl.TierIndex}</div>`;
     });
     const freeBytes = diskCap - totalSlice;
     if (freeBytes > diskCap * 0.01) {
       const freePct = (freeBytes / diskCap * 100);
-      sliceMapHTML += `<div style="width:${freePct}%;background:var(--border);display:flex;align-items:center;justify-content:center;font-size:9px;color:var(--muted)" title="Free: ${fmtBytes(freeBytes)}">free</div>`;
+      sliceMapHTML += `<div style="width:${freePct}%;background:rgba(134,134,134,0.08);display:flex;align-items:center;justify-content:center;font-size:0.6rem;color:var(--muted)" title="Free: ${fmtBytes(freeBytes)}">free</div>`;
     }
     sliceMapHTML += '</div></div>';
   });
@@ -280,7 +329,7 @@ function renderPool(summary, status) {
       <button class="danger" onclick="deletePool('${pool.ID}','${pool.Name}')">✕ Delete</button>
     </h2>
     ${isExternal ? '<div class="external-warning">⚠ External Enclosure — requires manual start/stop</div>' : ''}
-    <div style="font-size:12px;color:var(--muted);margin-bottom:12px">
+    <div style="font-size:0.8rem;color:var(--muted);margin-bottom:0.75rem">
       ID: ${pool.ID} &nbsp;|&nbsp; ${fmtParity(pool.ParityMode)} &nbsp;|&nbsp;
       Mount: ${pool.MountPoint}
     </div>
@@ -295,11 +344,10 @@ function renderPool(summary, status) {
       }, 0);
       const slicedTotal = poolDisks.reduce((s,d) => s + (d.Slices||[]).reduce((ss,sl) => ss + (sl.SizeBytes||0), 0), 0);
       const sumArrayCap = arrays.reduce((s,a) => s + (a.CapacityBytes||0), 0);
-      const raidParity = slicedTotal - sumArrayCap; // RAID redundancy + mdadm metadata
-      const overhead = sumArrayCap - usable; // LVM + ext4 overhead
+      const raidParity = slicedTotal - sumArrayCap;
+      const overhead = sumArrayCap - usable;
       const usablePct = rawTotal > 0 ? (usable / rawTotal * 100).toFixed(0) : 0;
       const parityPct = rawTotal > 0 ? (raidParity / rawTotal * 100).toFixed(0) : 0;
-      // Stacked bar
       const usedOfUsable = usable > 0 ? (used / usable * 100) : 0;
       const freeOfUsable = usable > 0 ? (free / usable * 100) : 0;
       const parityOfRaw = rawTotal > 0 ? (raidParity / rawTotal * 100) : 0;
@@ -307,28 +355,28 @@ function renderPool(summary, status) {
       const unallocOfRaw = rawTotal > 0 ? (unallocated / rawTotal * 100) : 0;
       const usableOfRaw = 100 - parityOfRaw - overheadOfRaw - unallocOfRaw;
       return `
-      <div style="margin-bottom:14px">
-        <div style="display:flex;gap:20px;font-size:13px;margin-bottom:6px">
-          <div><span style="color:var(--muted)">Raw Disk Total:</span> ${fmtBytes(rawTotal)}</div>
+      <div style="margin-bottom:0.875rem">
+        <div style="display:flex;gap:1.25rem;font-size:0.85rem;margin-bottom:0.4rem;flex-wrap:wrap">
+          <div><span style="color:var(--muted)">Raw:</span> ${fmtBytes(rawTotal)}</div>
           <div><span style="color:var(--muted)">Usable:</span> ${fmtBytes(usable)} <span style="color:var(--green)">(${usablePct}%)</span></div>
           <div><span style="color:var(--muted)">Used:</span> ${fmtBytes(used)}${usable > 0 ? ` (${(used/usable*100).toFixed(1)}%)` : ''}</div>
-          <div><span style="color:var(--muted)">Protection:</span> ${fmtBytes(raidParity)} <span style="color:var(--accent)">(${parityPct}%)</span></div>
+          <div><span style="color:var(--muted)">Protection:</span> ${fmtBytes(raidParity)} <span style="color:var(--secondary)">(${parityPct}%)</span></div>
           ${overhead > 0 ? `<div><span style="color:var(--muted)">Overhead:</span> ${fmtBytes(overhead)}</div>` : ''}
-          ${unallocated > 0 ? `<div><span style="color:var(--muted)">Expansion Potential:</span> <span style="color:var(--text)">${fmtBytes(unallocated)}</span></div>` : ''}
+          ${unallocated > 0 ? `<div><span style="color:var(--muted)">Expansion:</span> ${fmtBytes(unallocated)}</div>` : ''}
         </div>
-        <div style="display:flex;height:20px;border-radius:4px;overflow:hidden;font-size:10px;font-weight:600">
-          ${used > 0 ? `<div style="width:${usedOfUsable * usableOfRaw / 100}%;background:var(--green);display:flex;align-items:center;justify-content:center;color:#fff" title="Used: ${fmtBytes(used)}">Used</div>` : ''}
-          <div style="width:${freeOfUsable * usableOfRaw / 100}%;background:rgba(34,197,94,0.2);display:flex;align-items:center;justify-content:center;color:var(--green)" title="Free: ${fmtBytes(free)}">Free ${fmtBytes(free)}</div>
-          <div style="width:${parityOfRaw}%;background:rgba(59,130,246,0.25);display:flex;align-items:center;justify-content:center;color:var(--accent)" title="Parity/Redundancy: ${fmtBytes(raidParity)}">Parity ${fmtBytes(raidParity)}</div>
-          ${overheadOfRaw > 0.5 ? `<div style="width:${overheadOfRaw}%;background:rgba(234,179,8,0.2);display:flex;align-items:center;justify-content:center;color:var(--yellow);font-size:9px" title="LVM/ext4/mdadm overhead: ${fmtBytes(overhead)}">Overhead</div>` : ''}
-          ${unallocOfRaw > 0.5 ? `<div style="width:${unallocOfRaw}%;background:var(--border);display:flex;align-items:center;justify-content:center;color:var(--muted)" title="Unallocated: ${fmtBytes(unallocated)} — add more disks to create new tiers">Expansion ${fmtBytes(unallocated)}</div>` : ''}
+        <div style="display:flex;height:1.25rem;border-radius:3px;overflow:hidden;font-size:0.65rem;font-weight:600">
+          ${used > 0 ? `<div style="width:${usedOfUsable * usableOfRaw / 100}%;background:var(--green);display:flex;align-items:center;justify-content:center;color:rgba(20,20,20,1)" title="Used: ${fmtBytes(used)}">Used</div>` : ''}
+          <div style="width:${freeOfUsable * usableOfRaw / 100}%;background:rgba(130,229,80,0.15);display:flex;align-items:center;justify-content:center;color:var(--green)" title="Free: ${fmtBytes(free)}">Free ${fmtBytes(free)}</div>
+          <div style="width:${parityOfRaw}%;background:rgba(108,140,227,0.2);display:flex;align-items:center;justify-content:center;color:var(--secondary)" title="Parity: ${fmtBytes(raidParity)}">Parity</div>
+          ${overheadOfRaw > 0.5 ? `<div style="width:${overheadOfRaw}%;background:rgba(237,153,9,0.15);display:flex;align-items:center;justify-content:center;color:var(--yellow)" title="Overhead: ${fmtBytes(overhead)}">OH</div>` : ''}
+          ${unallocOfRaw > 0.5 ? `<div style="width:${unallocOfRaw}%;background:rgba(134,134,134,0.08);display:flex;align-items:center;justify-content:center;color:var(--muted)" title="Unallocated: ${fmtBytes(unallocated)}">Exp</div>` : ''}
         </div>
       </div>`;
     })()}
     <div id="rebuild-${pool.ID}"></div>
-    <h3 style="font-size:13px;margin:12px 0 6px">Arrays</h3>
+    <h3>Arrays</h3>
     <table><tr><th>Device</th><th>Level</th><th>Tier</th><th>State</th><th>Capacity</th><th>Members</th></tr>${arrayRows}</table>
-    <h3 style="font-size:13px;margin:12px 0 6px">Disks</h3>
+    <h3>Disks</h3>
     <table><tr><th>Device</th><th>Size</th><th>State</th><th>Arrays</th></tr>${diskRows}</table>
     ${sliceMapHTML}
   </div>`;
@@ -360,20 +408,20 @@ async function updateCreatePreview() {
   try {
     const p = await api('/preview-create', { method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({disks, parityMode: document.getElementById('parityMode').value}) });
-    let html = `<div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:13px">
-      <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+    let html = `<div style="background:var(--surface-deep);border:1px solid var(--border);border-radius:4px;padding:0.75rem;font-size:0.85rem">
+      <div style="display:flex;justify-content:space-between;margin-bottom:0.4rem">
         <span style="color:var(--muted)">Projected capacity</span><span style="color:var(--green)">${fmtBytes(p.usableCapacity)}</span>
       </div>
-      <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+      <div style="display:flex;justify-content:space-between;margin-bottom:0.4rem">
         <span style="color:var(--muted)">Tiers</span><span>${p.tiers}</span>
       </div>
-      <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+      <div style="display:flex;justify-content:space-between;margin-bottom:0.4rem">
         <span style="color:var(--muted)">Min disk for future expansion</span><span>${fmtBytes(p.minDiskSize)}</span>
       </div>`;
     if (p.warnings && p.warnings.length > 0) {
-      html += '<div style="margin-top:8px">';
+      html += '<div style="margin-top:0.5rem">';
       for (const w of p.warnings) {
-        html += `<div style="color:var(--yellow);font-size:12px;padding:4px 0">⚠ ${w}</div>`;
+        html += `<div style="color:var(--yellow);font-size:0.8rem;padding:0.25rem 0">⚠ ${w}</div>`;
       }
       html += '</div>';
     }
@@ -417,7 +465,6 @@ function chipSelector(id, disks, label) {
 }
 
 function chipSelect(groupId, el) {
-  // Single-select: deselect siblings, select this one
   document.querySelectorAll('#' + groupId + ' .disk-chip').forEach(c => c.classList.remove('selected'));
   el.classList.toggle('selected');
 }
@@ -430,7 +477,7 @@ function getChipValue(groupId) {
 async function showAddDisk(poolID) {
   const disks = await api('/disks');
   const free = disks.filter(d => !d.inUse);
-  const previewDiv = '<div id="addDiskPreview" style="margin-top:12px"></div>';
+  const previewDiv = '<div id="addDiskPreview" style="margin-top:0.75rem"></div>';
   showAction('Add Disk',
     (free.length ? chipSelector('addDiskSel', free, 'Select an available disk') : '<p style="color:var(--muted)">No available disks</p>') + previewDiv,
     async () => {
@@ -440,7 +487,6 @@ async function showAddDisk(poolID) {
         body: JSON.stringify({disk: dev}) });
       toast('Disk added'); closeModal('actionModal'); refresh();
     });
-  // Attach preview on chip click
   setTimeout(() => {
     document.querySelectorAll('#addDiskSel .disk-chip').forEach(chip => {
       const origClick = chip.onclick;
@@ -448,26 +494,26 @@ async function showAddDisk(poolID) {
         chipSelect('addDiskSel', this);
         const dev = this.dataset.dev;
         const el = document.getElementById('addDiskPreview');
-        el.innerHTML = '<span style="color:var(--muted);font-size:12px">Calculating...</span>';
+        el.innerHTML = '<span style="color:var(--muted);font-size:0.8rem">Calculating...</span>';
         try {
           const p = await api('/preview-add', { method: 'POST', headers: {'Content-Type':'application/json'},
             body: JSON.stringify({poolID, disk: dev}) });
           el.innerHTML = `
-            <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:13px">
-              <div style="display:flex;justify-content:space-between;margin-bottom:8px">
+            <div style="background:var(--surface-deep);border:1px solid var(--border);border-radius:4px;padding:0.75rem;font-size:0.85rem">
+              <div style="display:flex;justify-content:space-between;margin-bottom:0.5rem">
                 <span style="color:var(--muted)">Current capacity</span><span>${fmtBytes(p.currentCapacity)}</span>
               </div>
-              <div style="display:flex;justify-content:space-between;margin-bottom:8px">
+              <div style="display:flex;justify-content:space-between;margin-bottom:0.5rem">
                 <span style="color:var(--muted)">After adding ${dev.replace('/dev/','')}</span><span style="color:var(--green)">${fmtBytes(p.projectedCapacity)}</span>
               </div>
-              <div style="display:flex;justify-content:space-between;margin-bottom:8px">
+              <div style="display:flex;justify-content:space-between;margin-bottom:0.5rem">
                 <span style="color:var(--muted)">Capacity gain</span><span style="color:var(--green)">+${fmtBytes(p.gainBytes)}</span>
               </div>
               <div style="display:flex;justify-content:space-between">
                 <span style="color:var(--muted)">Tiers</span><span>${p.currentTiers} → ${p.projectedTiers}</span>
               </div>
             </div>`;
-        } catch(e) { el.innerHTML = `<span style="color:var(--red);font-size:12px">${e.message}</span>`; }
+        } catch(e) { el.innerHTML = `<span style="color:var(--red);font-size:0.8rem">${e.message}</span>`; }
       };
     });
   }, 0);
@@ -478,7 +524,7 @@ async function showRemoveDisk(poolID) {
   const poolDisks = (status?.DiskStatuses || []).filter(d => d.State === 'healthy').map(d => ({device: d.Device, sizeGB: (d.CapacityBytes||0)/1e9}));
   showAction('Remove Disk',
     (poolDisks.length ? chipSelector('removeDiskSel', poolDisks.map(d => ({device:d.device, sizeGB:d.sizeGB})), 'Select a disk to remove') : '<p style="color:var(--muted)">No disks</p>') +
-    '<div id="removePreview" style="margin-top:12px"></div>',
+    '<div id="removePreview" style="margin-top:0.75rem"></div>',
     async () => {
       const dev = getChipValue('removeDiskSel');
       if (!dev) return toast('Select a disk', true);
@@ -486,38 +532,36 @@ async function showRemoveDisk(poolID) {
       await api('/pools/' + poolID + '/disks/' + devName, { method: 'DELETE' });
       toast('Disk removed'); closeModal('actionModal'); refresh();
     });
-  // Attach preview on chip click
   setTimeout(() => {
     document.querySelectorAll('#removeDiskSel .disk-chip').forEach(chip => {
       chip.onclick = async function() {
         chipSelect('removeDiskSel', this);
         const dev = this.dataset.dev;
         const el = document.getElementById('removePreview');
-        el.innerHTML = '<span style="color:var(--muted);font-size:12px">Checking safety...</span>';
+        el.innerHTML = '<span style="color:var(--muted);font-size:0.8rem">Checking safety...</span>';
         try {
           const p = await api('/preview-remove', { method: 'POST', headers: {'Content-Type':'application/json'},
             body: JSON.stringify({poolID, disk: dev}) });
-          let html = `<div style="background:var(--bg);border:1px solid ${p.safe?'var(--green)':'var(--red)'};border-radius:8px;padding:12px;font-size:13px">
-            <div style="margin-bottom:8px;font-weight:600;color:${p.safe?'var(--green)':'var(--red)'}">${p.safe ? '✓ Safe to remove' : '✕ Unsafe to remove'}</div>
-            <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+          let html = `<div style="background:var(--surface-deep);border:1px solid ${p.safe?'rgba(130,229,80,0.3)':'rgba(224,62,62,0.3)'};border-radius:4px;padding:0.75rem;font-size:0.85rem">
+            <div style="margin-bottom:0.5rem;font-weight:600;color:${p.safe?'var(--green)':'var(--red)'}">${p.safe ? '✓ Safe to remove' : '✕ Unsafe to remove'}</div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:0.25rem">
               <span style="color:var(--muted)">Current capacity</span><span>${fmtBytes(p.currentCapacity)}</span>
             </div>
-            <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+            <div style="display:flex;justify-content:space-between;margin-bottom:0.25rem">
               <span style="color:var(--muted)">After removal</span><span>${fmtBytes(p.projectedCapacity)}</span>
             </div>
             <div style="display:flex;justify-content:space-between">
               <span style="color:var(--muted)">Capacity loss</span><span style="color:var(--red)">−${fmtBytes(p.lossBytes)}</span>
             </div>`;
           if (p.warnings && p.warnings.length > 0) {
-            html += '<div style="margin-top:8px">';
-            for (const w of p.warnings) html += `<div style="color:var(--red);font-size:12px;padding:2px 0">⚠ ${w}</div>`;
+            html += '<div style="margin-top:0.5rem">';
+            for (const w of p.warnings) html += `<div style="color:var(--red);font-size:0.8rem;padding:0.15rem 0">⚠ ${w}</div>`;
             html += '</div>';
           }
           html += '</div>';
           el.innerHTML = html;
-          // Disable submit if unsafe
           document.getElementById('actionSubmit').disabled = !p.safe;
-        } catch(e) { el.innerHTML = `<span style="color:var(--red);font-size:12px">${e.message}</span>`; }
+        } catch(e) { el.innerHTML = `<span style="color:var(--red);font-size:0.8rem">${e.message}</span>`; }
       };
     });
   }, 0);
@@ -615,7 +659,7 @@ async function setAutoStart(name, value) {
 function watchRebuild(poolID) {
   const el = document.getElementById('rebuild-' + poolID);
   if (!el || activeSSE[poolID]) return;
-  el.innerHTML = '<div style="font-size:12px;color:var(--muted)">Monitoring rebuild...</div>';
+  el.innerHTML = '<div style="font-size:0.8rem;color:var(--muted)">Monitoring rebuild...</div>';
   const es = new EventSource(API + '/pools/' + poolID + '/rebuild');
   activeSSE[poolID] = es;
   es.onmessage = (e) => {
@@ -626,11 +670,11 @@ function watchRebuild(poolID) {
     for (const a of arrays) {
       if (a.State === 'rebuilding') {
         const pct = (progress[a.Device] || 0).toFixed(1);
-        html += `<div style="margin:4px 0;font-size:12px">${a.Device} rebuilding — ${pct}%
+        html += `<div style="margin:0.25rem 0;font-size:0.8rem">${a.Device} rebuilding — ${pct}%
           <div class="progress-bar"><div class="fill" style="width:${pct}%"></div></div></div>`;
       }
     }
-    if (html) el.innerHTML = html; else el.innerHTML = '<div style="font-size:12px;color:var(--green)">✓ Rebuild complete</div>';
+    if (html) el.innerHTML = html; else el.innerHTML = '<div style="font-size:0.8rem;color:var(--green)">✓ Rebuild complete</div>';
   };
   es.addEventListener('done', () => { es.close(); delete activeSSE[poolID]; refresh(); });
   es.addEventListener('error', () => { es.close(); delete activeSSE[poolID]; el.innerHTML = ''; });
@@ -638,7 +682,6 @@ function watchRebuild(poolID) {
 
 function closeModal(id) { document.getElementById(id).classList.remove('active'); }
 
-// Close modals on overlay click
 document.querySelectorAll('.modal-overlay').forEach(el => {
   el.addEventListener('click', e => { if (e.target === el) el.classList.remove('active'); });
 });
@@ -648,15 +691,12 @@ async function refreshAlerts() {
   try {
     const alerts = await api('/alerts');
     const el = document.getElementById('alerts');
-    if (!alerts || alerts.length === 0) {
-      el.innerHTML = '';
-      return;
-    }
+    if (!alerts || alerts.length === 0) { el.innerHTML = ''; return; }
     el.innerHTML = '<div class="card"><h2>⚡ Alerts</h2>' +
       alerts.slice().reverse().slice(0, 20).map(a => {
         const cls = a.level === 'critical' ? 'color:var(--red)' : a.level === 'warning' ? 'color:var(--yellow)' : 'color:var(--muted)';
         const t = new Date(a.timestamp).toLocaleTimeString();
-        return `<div style="font-size:12px;padding:4px 0;border-bottom:1px solid var(--border)">
+        return `<div style="font-size:0.8rem;padding:0.25rem 0;border-bottom:1px solid rgba(134,134,134,0.12)">
           <span style="${cls};font-weight:600">${a.level.toUpperCase()}</span>
           <span style="color:var(--muted)">${t}</span>
           ${a.device ? `<span>${a.device}</span>` : ''}
@@ -670,15 +710,12 @@ async function refreshLogs() {
   try {
     const logs = await api('/logs');
     const el = document.getElementById('logs');
-    if (!logs || logs.length === 0) {
-      el.innerHTML = '';
-      return;
-    }
+    if (!logs || logs.length === 0) { el.innerHTML = ''; return; }
     const levelColor = {info:'var(--green)', warn:'var(--yellow)', error:'var(--red)'};
-    el.innerHTML = '<div class="card"><h2>📋 Logs <button onclick="clearLogs()" style="font-size:11px;padding:2px 8px;margin-left:8px">Clear</button></h2><div style="max-height:300px;overflow-y:auto">' +
+    el.innerHTML = '<div class="card"><h2>📋 Logs <button onclick="clearLogs()" style="font-size:0.7rem;padding:0.15em 0.5em;margin-left:0.5rem">Clear</button></h2><div style="max-height:300px;overflow-y:auto">' +
       logs.slice().reverse().slice(0, 50).map(l => {
         const t = new Date(l.timestamp).toLocaleTimeString();
-        return `<div style="font-size:11px;padding:3px 0;border-bottom:1px solid var(--border);font-family:monospace">
+        return `<div style="font-size:0.75rem;padding:0.2rem 0;border-bottom:1px solid rgba(134,134,134,0.08);font-family:Consolas,menlo,monospace">
           <span style="color:var(--muted)">${t}</span>
           <span style="color:${levelColor[l.level]||'var(--text)'};font-weight:600">${l.level.toUpperCase().padEnd(5)}</span>
           <span>${l.message}</span></div>`;
@@ -712,23 +749,23 @@ async function refreshSafety() {
       return Math.floor(sec/3600) + 'h ago';
     };
     const features = [
-      { icon: '💚', name: 'SMART Monitoring', interval: s.smart.interval, last: s.smart.lastRun, detail: s.smart.detail },
-      { icon: '🔍', name: 'Scrub Scheduler', interval: s.scrub.interval, last: s.scrub.lastRun, detail: s.scrub.detail || 'periodic array check' },
-      { icon: '💾', name: 'Metadata Backup', interval: s.metadataBackup.interval, last: s.metadataBackup.lastRun, detail: s.metadataBackup.detail || 'to pool mount' },
-      { icon: '🔧', name: 'Boot Config', interval: s.bootConfig.interval, last: s.bootConfig.lastRun, detail: s.bootConfig.detail || 'mdadm.conf + initramfs' },
-      { icon: '🛡️', name: 'Graceful Shutdown', interval: s.gracefulShutdown.interval, last: null, detail: s.gracefulShutdown.detail },
+      { icon: '💚', name: 'SMART', interval: s.smart.interval, last: s.smart.lastRun, detail: s.smart.detail },
+      { icon: '🔍', name: 'Scrub', interval: s.scrub.interval, last: s.scrub.lastRun, detail: s.scrub.detail || 'periodic check' },
+      { icon: '💾', name: 'Backup', interval: s.metadataBackup.interval, last: s.metadataBackup.lastRun, detail: s.metadataBackup.detail || 'to pool mount' },
+      { icon: '🔧', name: 'Boot Config', interval: s.bootConfig.interval, last: s.bootConfig.lastRun, detail: s.bootConfig.detail || 'mdadm.conf' },
+      { icon: '🛡️', name: 'Shutdown', interval: s.gracefulShutdown.interval, last: null, detail: s.gracefulShutdown.detail },
     ];
     el.innerHTML = `<div class="card"><h2>🛡️ Safety Daemon</h2>
-      <div style="display:flex;gap:8px;margin-bottom:12px;font-size:13px">
+      <div style="display:flex;gap:0.5rem;margin-bottom:0.75rem;font-size:0.85rem">
         <span style="color:var(--green)">● Running</span>
         <span style="color:var(--muted)">Uptime: ${s.uptime}</span>
       </div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px">
-        ${features.map(f => `<div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px">
-          <div style="font-weight:600;margin-bottom:4px">${f.icon} ${f.name}</div>
-          <div style="font-size:12px;color:var(--muted)">Every ${f.interval}</div>
-          ${f.last ? `<div style="font-size:12px;color:var(--green)">Last: ${ago(f.last)}</div>` : ''}
-          ${f.detail ? `<div style="font-size:11px;color:var(--muted);margin-top:2px">${f.detail}</div>` : ''}
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:0.5rem">
+        ${features.map(f => `<div style="background:var(--surface-deep);border:1px solid var(--border);border-radius:4px;padding:0.6rem">
+          <div style="font-weight:500;margin-bottom:0.25rem;font-size:0.85rem">${f.icon} ${f.name}</div>
+          <div style="font-size:0.75rem;color:var(--muted)">Every ${f.interval}</div>
+          ${f.last ? `<div style="font-size:0.75rem;color:var(--green)">Last: ${ago(f.last)}</div>` : ''}
+          ${f.detail ? `<div style="font-size:0.7rem;color:var(--muted);margin-top:0.15rem">${f.detail}</div>` : ''}
         </div>`).join('')}
       </div>
     </div>`;
@@ -743,10 +780,7 @@ refreshSafety();
 setInterval(refreshAlerts, 15000);
 setInterval(refreshLogs, 10000);
 setInterval(refreshSafety, 15000);
-// Auto-refresh every 10s (5s when rebuilding)
 let refreshInterval = setInterval(refresh, 10000);
-
-// Track active SSE connections
 let activeSSE = {};
 
 async function autoWatchRebuilds() {
@@ -758,7 +792,6 @@ async function autoWatchRebuilds() {
       const isRebuilding = (status.ArrayStatuses || []).some(a => a.State === 'rebuilding');
       if (isRebuilding && !activeSSE[p.ID]) {
         watchRebuild(p.ID);
-        // Speed up refresh during rebuild
         clearInterval(refreshInterval);
         refreshInterval = setInterval(refresh, 5000);
       }
