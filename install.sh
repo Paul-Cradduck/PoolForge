@@ -57,9 +57,29 @@ if curl -fsSL "$RELEASE_URL" -o /usr/local/bin/poolforge 2>/dev/null; then
 else
   # Fallback: build from source
   echo "Release binary not found, building from source..."
-  apt-get install -y -qq golang-go git > /dev/null 2>&1
+  apt-get install -y -qq git > /dev/null 2>&1
+
+  # Install Go from official tarball if not present or too old
+  GO_VERSION="1.22.4"
+  NEED_GO=true
+  if command -v go &>/dev/null; then
+    CURRENT=$(go version | grep -oP 'go\K[0-9]+\.[0-9]+')
+    if [ "$(printf '%s\n' "1.22" "$CURRENT" | sort -V | head -n1)" = "1.22" ]; then
+      NEED_GO=false
+    fi
+  fi
+  if $NEED_GO; then
+    echo "Installing Go ${GO_VERSION}..."
+    curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" -o /tmp/go.tar.gz
+    rm -rf /usr/local/go
+    tar -C /usr/local -xzf /tmp/go.tar.gz
+    rm -f /tmp/go.tar.gz
+    export PATH="/usr/local/go/bin:$PATH"
+    echo -e "${GREEN}✓ Go ${GO_VERSION} installed${NC}"
+  fi
+
   TMPDIR=$(mktemp -d)
-  git clone --depth 1 https://github.com/Paul-Cradduck/PoolForge.git "$TMPDIR" 2>/dev/null
+  git clone --depth 1 https://github.com/Paul-Cradduck/PoolForge.git "$TMPDIR"
   cd "$TMPDIR"
   go build -o /usr/local/bin/poolforge ./cmd/poolforge
   rm -rf "$TMPDIR"
