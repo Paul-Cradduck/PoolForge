@@ -1,0 +1,11 @@
+# 2026/03/10 14:56:36.198282 [TestPropertyP83_OperationalStatusStateMachine] [rapid] draw initial: 2
+# 2026/03/10 14:56:36.257821 [TestPropertyP83_OperationalStatusStateMachine] starting from safe_to_power_down should succeed, got vgchange -ay failed: vgchange -ay vg1: exit status 5
+#   WARNING: Running as a non-root user. Functionality may be unavailable.
+#   /run/lock/lvm/V_vg1:aux: open failed: Permission denied
+#   Can't get lock for vg1.
+#   Cannot process volume group vg1
+# 
+v0.4.8#12421104947261521632
+0x0
+0x38e38e38e38e4
+0x2

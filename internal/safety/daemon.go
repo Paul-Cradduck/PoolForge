@@ -20,6 +20,7 @@ type DaemonConfig struct {
 	AlertConfig   AlertConfig
 	SMARTInterval time.Duration
 	ScrubInterval time.Duration
+	RAIDManager   interface{ GetArrayUUID(string) (string, error) } // Phase 5: for UUID population
 }
 
 type Daemon struct {
@@ -117,6 +118,9 @@ func (d *Daemon) Run(ctx context.Context) {
 	// Graceful shutdown handler
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	// Phase 5: Boot pools (migration + per-pool auto-start)
+	d.bootPools()
 
 	// Generate mdadm.conf on startup
 	d.updateBootConfig()
@@ -224,16 +228,13 @@ func (d *Daemon) backupMetadata() {
 }
 
 func (d *Daemon) updateBootConfig() {
-	arrays := d.getArrayDevices()
-	if len(arrays) > 0 {
-		if err := GenerateMdadmConf(arrays); err != nil {
-			d.logs.Warn("mdadm.conf update failed: %v", err)
-		} else {
-			d.logs.Info("mdadm.conf updated with %d arrays", len(arrays))
-			d.mu.Lock()
-			d.lastBootConfig = time.Now()
-			d.mu.Unlock()
-		}
+	if err := GenerateBootConfigFromMetadata(d.cfg.MetadataStore); err != nil {
+		d.logs.Warn("mdadm.conf update failed: %v", err)
+	} else {
+		d.logs.Info("mdadm.conf updated (pool-aware)")
+		d.mu.Lock()
+		d.lastBootConfig = time.Now()
+		d.mu.Unlock()
 	}
 }
 
@@ -267,4 +268,91 @@ func (d *Daemon) shutdown() {
 		}
 	}
 	log.Println("[safety] shutdown complete")
+}
+
+// Phase 5: Boot pools with migration detection and per-pool auto-start.
+func (d *Daemon) bootPools() {
+	pools, err := d.cfg.MetadataStore.ListPools()
+	if err != nil || len(pools) == 0 {
+		return
+	}
+
+	// Detect first run after upgrade
+	needsMigration := false
+	for _, ps := range pools {
+		pool, err := d.cfg.MetadataStore.LoadPool(ps.ID)
+		if err != nil {
+			continue
+		}
+		if pool.OperationalStatus == "" {
+			needsMigration = true
+			break
+		}
+	}
+	if needsMigration {
+		d.migrateToPhase5(pools)
+	}
+
+	// Per-pool auto-start
+	for _, ps := range pools {
+		pool, err := d.cfg.MetadataStore.LoadPool(ps.ID)
+		if err != nil {
+			d.logs.Error("failed to load pool %s: %v", ps.Name, err)
+			continue
+		}
+		if pool.RequiresManualStart {
+			pool.OperationalStatus = engine.PoolOffline
+			d.cfg.MetadataStore.SavePool(pool)
+			d.logs.Info("pool %s: skipped (manual start required)", pool.Name)
+		} else {
+			d.logs.Info("pool %s: auto-start (internal pool)", pool.Name)
+			// Internal pools are already assembled by the system — just ensure status is Running
+			pool.OperationalStatus = engine.PoolRunning
+			d.cfg.MetadataStore.SavePool(pool)
+		}
+	}
+}
+
+// migrateToPhase5 performs one-time migration for pools created by Phase 1-4 builds.
+func (d *Daemon) migrateToPhase5(pools []engine.PoolSummary) {
+	d.logs.Info("PoolForge upgraded to Phase 5. Performing one-time metadata migration.")
+
+	for _, ps := range pools {
+		pool, err := d.cfg.MetadataStore.LoadPool(ps.ID)
+		if err != nil {
+			d.logs.Error("migration: failed to load pool %s: %v", ps.Name, err)
+			continue
+		}
+
+		pool.IsExternal = false
+		pool.RequiresManualStart = false
+		pool.OperationalStatus = engine.PoolRunning
+
+		// Populate Array UUIDs from live mdadm --detail
+		if d.cfg.RAIDManager != nil {
+			for i, arr := range pool.RAIDArrays {
+				if arr.UUID == "" {
+					uuid, err := d.cfg.RAIDManager.GetArrayUUID(arr.Device)
+					if err != nil {
+						d.logs.Warn("migration: could not get UUID for %s: %v", arr.Device, err)
+					} else {
+						pool.RAIDArrays[i].UUID = uuid
+					}
+				}
+			}
+		}
+
+		if err := d.cfg.MetadataStore.SavePool(pool); err != nil {
+			d.logs.Error("migration: failed to save pool %s: %v", ps.Name, err)
+		} else {
+			d.logs.Info("migration: pool %s migrated to Phase 5", pool.Name)
+		}
+	}
+
+	// Regenerate Boot_Config
+	if err := GenerateBootConfigFromMetadata(d.cfg.MetadataStore); err != nil {
+		d.logs.Error("migration: failed to regenerate Boot_Config: %v", err)
+	}
+
+	d.logs.Info("PoolForge upgraded to Phase 5. Metadata migrated. Boot config updated.")
 }

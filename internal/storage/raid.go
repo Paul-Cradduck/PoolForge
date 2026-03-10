@@ -172,3 +172,88 @@ func (r *raidManager) GetSyncStatus(device string) (*SyncStatus, error) {
 	}
 	return nil, fmt.Errorf("device %s not found in /proc/mdstat", device)
 }
+
+// Phase 5: External enclosure support methods
+
+func (r *raidManager) GetArrayUUID(device string) (string, error) {
+	out, err := exec.Command("mdadm", "--detail", device).Output()
+	if err != nil {
+		return "", fmt.Errorf("mdadm detail %s: %w", device, err)
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "UUID :") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "UUID :")), nil
+		}
+	}
+	return "", fmt.Errorf("UUID not found for %s", device)
+}
+
+func (r *raidManager) AssembleArrayBySuperblock(uuid string) (*RAIDArrayInfo, error) {
+	out, err := exec.Command("mdadm", "--assemble", "--scan", "--uuid="+uuid).CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("mdadm assemble by UUID %s: %w\n%s", uuid, err, out)
+	}
+	// Parse assembled device from output
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.Contains(line, "/dev/md") {
+			re := regexp.MustCompile(`(/dev/md\d+)`)
+			if m := re.FindString(line); m != "" {
+				return &RAIDArrayInfo{Device: m, State: "active"}, nil
+			}
+		}
+	}
+	return &RAIDArrayInfo{State: "active"}, nil
+}
+
+func (r *raidManager) ReAddMember(arrayDevice string, member string) error {
+	out, err := exec.Command("mdadm", arrayDevice, "--re-add", member).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("mdadm re-add %s to %s: %w\n%s", member, arrayDevice, err, out)
+	}
+	return nil
+}
+
+func (r *raidManager) ScanSuperblocks(arrayUUID string) ([]SuperblockMatch, error) {
+	// List all partitions from /proc/partitions
+	data, err := os.ReadFile("/proc/partitions")
+	if err != nil {
+		return nil, err
+	}
+	var matches []SuperblockMatch
+	partRe := regexp.MustCompile(`\s+\d+\s+\d+\s+\d+\s+(sd[a-z]+\d+|nvme\d+n\d+p\d+)`)
+	for _, line := range strings.Split(string(data), "\n") {
+		m := partRe.FindStringSubmatch(line)
+		if len(m) < 2 {
+			continue
+		}
+		partDev := "/dev/" + m[1]
+		out, err := exec.Command("mdadm", "--examine", partDev).Output()
+		if err != nil {
+			continue
+		}
+		for _, eline := range strings.Split(string(out), "\n") {
+			eline = strings.TrimSpace(eline)
+			if strings.HasPrefix(eline, "Array UUID :") {
+				uuid := strings.TrimSpace(strings.TrimPrefix(eline, "Array UUID :"))
+				if uuid == arrayUUID {
+					prev := ""
+					// Try to extract previous device from superblock
+					for _, dl := range strings.Split(string(out), "\n") {
+						dl = strings.TrimSpace(dl)
+						if strings.HasPrefix(dl, "Device Role :") || strings.HasPrefix(dl, "Events :") {
+							// no direct previous device in examine output
+						}
+					}
+					matches = append(matches, SuperblockMatch{
+						PartitionDevice: partDev,
+						ArrayUUID:       uuid,
+						PreviousDevice:  prev,
+					})
+				}
+				break
+			}
+		}
+	}
+	return matches, nil
+}

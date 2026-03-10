@@ -32,6 +32,12 @@ type RAIDManager interface {
 	RemoveMember(device string, member string) error
 	ReshapeArray(device string, newCount int, newLevel int) error
 	GetSyncStatus(device string) (*SyncStatus, error)
+
+	// Phase 5: External enclosure support
+	GetArrayUUID(device string) (string, error)
+	AssembleArrayBySuperblock(uuid string) (*RAIDArrayInfo, error)
+	ReAddMember(arrayDevice string, member string) error
+	ScanSuperblocks(arrayUUID string) ([]SuperblockMatch, error)
 }
 
 type SyncStatus struct {
@@ -61,6 +67,7 @@ type RAIDArrayDetail struct {
 	State         string
 	Members       []MemberInfo
 	CapacityBytes uint64
+	UUID          string
 }
 
 type MemberInfo struct {
@@ -81,6 +88,11 @@ type LVMManager interface {
 	RemovePhysicalVolume(device string) error
 	CheckPhysicalVolume(device string) bool
 	RestoreMissingPV(vgName string, device string) error
+
+	// Phase 5: Activate/Deactivate
+	ActivateVolumeGroup(name string) error
+	DeactivateVolumeGroup(name string) error
+	DeactivateLogicalVolume(lvPath string) error
 }
 
 type VGInfo struct {
@@ -104,4 +116,11 @@ type FSUsage struct {
 	TotalBytes uint64
 	UsedBytes  uint64
 	FreeBytes  uint64
+}
+
+// Phase 5: Superblock match result
+type SuperblockMatch struct {
+	PartitionDevice string
+	ArrayUUID       string
+	PreviousDevice  string
 }

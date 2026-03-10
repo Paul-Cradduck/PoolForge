@@ -132,6 +132,12 @@ func (s *Server) handlePool(w http.ResponseWriter, r *http.Request) {
 		s.handleReplaceDisk(w, r, poolID)
 	case "rebuild":
 		s.handleRebuildSSE(w, r, poolID)
+	case "start":
+		s.handleStartPool(w, r, poolID)
+	case "stop":
+		s.handleStopPool(w, r, poolID)
+	case "autostart":
+		s.handleSetAutoStart(w, r, poolID)
 	default:
 		w.WriteHeader(http.StatusNotFound)
 	}
@@ -717,4 +723,120 @@ func (s *Server) logInfo(format string, args ...interface{}) {
 	if s.logs != nil {
 		s.logs.Info(format, args...)
 	}
+}
+
+// Phase 5: Pool start/stop/autostart handlers
+
+func (s *Server) handleStartPool(w http.ResponseWriter, r *http.Request, poolNameOrID string) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	force := r.URL.Query().Get("force") == "true"
+	result, err := s.engine.StartPool(r.Context(), poolNameOrID, force)
+	if err != nil {
+		msg := err.Error()
+		if strings.Contains(msg, "not found") {
+			httpError(w, err, http.StatusNotFound)
+		} else if strings.Contains(msg, "already running") {
+			httpError(w, err, http.StatusConflict)
+		} else {
+			httpError(w, err, http.StatusInternalServerError)
+		}
+		return
+	}
+	// If warnings with no array results, it's a pending confirmation
+	if len(result.Warnings) > 0 && len(result.ArrayResults) == 0 {
+		resp := map[string]interface{}{
+			"pool_name": result.PoolName,
+			"status":    "pending_confirmation",
+			"warnings":  result.Warnings,
+		}
+		jsonResp(w, resp)
+		return
+	}
+	var arrayResults []map[string]interface{}
+	for _, ar := range result.ArrayResults {
+		entry := map[string]interface{}{
+			"device":     ar.Device,
+			"tier_index": ar.TierIndex,
+			"state":      string(ar.State),
+		}
+		if len(ar.ReAddedParts) > 0 {
+			entry["readded_parts"] = ar.ReAddedParts
+		}
+		if len(ar.FullRebuilds) > 0 {
+			entry["full_rebuilds"] = ar.FullRebuilds
+		}
+		arrayResults = append(arrayResults, entry)
+	}
+	resp := map[string]interface{}{
+		"pool_name":     result.PoolName,
+		"status":        "running",
+		"mount_point":   result.MountPoint,
+		"array_results": arrayResults,
+	}
+	if len(result.Warnings) > 0 {
+		resp["warnings"] = result.Warnings
+	}
+	s.logInfo("pool '%s' started", poolNameOrID)
+	jsonResp(w, resp)
+}
+
+func (s *Server) handleStopPool(w http.ResponseWriter, r *http.Request, poolNameOrID string) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	err := s.engine.StopPool(r.Context(), poolNameOrID)
+	if err != nil {
+		msg := err.Error()
+		if strings.Contains(msg, "not found") {
+			httpError(w, err, http.StatusNotFound)
+		} else if strings.Contains(msg, "not running") {
+			httpError(w, err, http.StatusConflict)
+		} else {
+			httpError(w, err, http.StatusInternalServerError)
+		}
+		return
+	}
+	s.logInfo("pool '%s' stopped", poolNameOrID)
+	jsonResp(w, map[string]string{
+		"pool_name": poolNameOrID,
+		"status":    "safe_to_power_down",
+		"message":   "It is now SAFE to power down the external enclosure.",
+	})
+}
+
+func (s *Server) handleSetAutoStart(w http.ResponseWriter, r *http.Request, poolNameOrID string) {
+	if r.Method != http.MethodPut {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		AutoStart *bool `json:"auto_start"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.AutoStart == nil {
+		httpError(w, fmt.Errorf("request body must contain 'auto_start' boolean"), http.StatusBadRequest)
+		return
+	}
+	err := s.engine.SetAutoStart(r.Context(), poolNameOrID, *req.AutoStart)
+	if err != nil {
+		msg := err.Error()
+		if strings.Contains(msg, "not found") {
+			httpError(w, err, http.StatusNotFound)
+		} else {
+			httpError(w, err, http.StatusInternalServerError)
+		}
+		return
+	}
+	msg := fmt.Sprintf("Auto-start set to %v for pool '%s'", *req.AutoStart, poolNameOrID)
+	if !*req.AutoStart {
+		msg = fmt.Sprintf("Auto-start disabled for pool '%s'. Manual start required.", poolNameOrID)
+	}
+	jsonResp(w, map[string]interface{}{
+		"pool_name":  poolNameOrID,
+		"auto_start": *req.AutoStart,
+		"message":    msg,
+	})
 }

@@ -55,6 +55,15 @@ const (
 	DiskFailed  DiskState = "failed"
 )
 
+// PoolOperationalStatus represents the runtime state of a pool.
+type PoolOperationalStatus string
+
+const (
+	PoolRunning        PoolOperationalStatus = "running"
+	PoolOffline        PoolOperationalStatus = "offline"
+	PoolSafeToShutdown PoolOperationalStatus = "safe_to_power_down"
+)
+
 type Pool struct {
 	ID            string
 	Name          string
@@ -68,6 +77,13 @@ type Pool struct {
 	MountPoint    string
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
+
+	// Phase 5: External enclosure support
+	IsExternal          bool                  `json:"is_external"`
+	RequiresManualStart bool                  `json:"requires_manual_start"`
+	OperationalStatus   PoolOperationalStatus `json:"operational_status"`
+	LastShutdown        *time.Time            `json:"last_shutdown"`
+	LastStartup         *time.Time            `json:"last_startup"`
 }
 
 type DiskInfo struct {
@@ -99,12 +115,14 @@ type RAIDArray struct {
 	State         ArrayState
 	Members       []string
 	CapacityBytes uint64
+	UUID          string `json:"uuid"`
 }
 
 type CreatePoolRequest struct {
 	Name       string
 	Disks      []string
 	ParityMode ParityMode
+	External   bool // Phase 5: if true, sets IsExternal=true, RequiresManualStart=true
 }
 
 type PoolSummary struct {
@@ -172,4 +190,27 @@ type ArrayChange struct {
 	OldMembers   int
 	NewMembers   int
 	Destroyed    bool
+}
+
+// Phase 5: Pool Start/Stop result types
+
+type StartPoolResult struct {
+	PoolName     string
+	MountPoint   string
+	ArrayResults []ArrayStartResult
+	Warnings     []string
+}
+
+type ArrayStartResult struct {
+	Device       string
+	TierIndex    int
+	State        ArrayState
+	ReAddedParts []string
+	FullRebuilds []string
+}
+
+type SuperblockMatch struct {
+	PartitionDevice string
+	ArrayUUID       string
+	PreviousDevice  string
 }

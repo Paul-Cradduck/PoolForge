@@ -11,11 +11,12 @@ import (
 )
 
 type engineImpl struct {
-	disk storage.DiskManager
-	raid storage.RAIDManager
-	lvm  storage.LVMManager
-	fs   storage.FilesystemManager
-	meta MetadataStore
+	disk      storage.DiskManager
+	raid      storage.RAIDManager
+	lvm       storage.LVMManager
+	fs        storage.FilesystemManager
+	meta      MetadataStore
+	stopDelay time.Duration // Phase 5: delay between array stops (default 1s)
 }
 
 func NewEngine(disk storage.DiskManager, raid storage.RAIDManager, lvm storage.LVMManager, fs storage.FilesystemManager, meta MetadataStore) EngineService {
@@ -180,6 +181,9 @@ func (e *engineImpl) CreatePool(ctx context.Context, req CreatePoolRequest) (*Po
 		MountPoint:    mountPoint,
 		CreatedAt:     now,
 		UpdatedAt:     now,
+		IsExternal:          req.External,
+		RequiresManualStart: req.External,
+		OperationalStatus:   PoolRunning,
 	}
 
 	if err := e.meta.SavePool(pool); err != nil {

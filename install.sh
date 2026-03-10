@@ -36,6 +36,20 @@ apt-get update -qq
 apt-get install -y -qq mdadm lvm2 smartmontools curl > /dev/null 2>&1
 echo -e "${GREEN}✓ Dependencies installed${NC}"
 
+# Phase 5: Disable mdadm systemd services so PoolForge controls array assembly
+MDADM_SERVICES="mdmonitor.service mdadm.service mdadm-waitidle.service"
+for svc in $MDADM_SERVICES; do
+  if systemctl list-unit-files "$svc" &>/dev/null; then
+    systemctl stop "$svc" 2>/dev/null || true
+    systemctl disable "$svc" 2>/dev/null || true
+    systemctl mask "$svc" 2>/dev/null || true
+    echo -e "${GREEN}✓ Disabled mdadm service: $svc${NC}"
+  else
+    echo "  mdadm service not found (skipped): $svc"
+  fi
+done
+echo -e "${GREEN}✓ mdadm auto-assembly disabled. PoolForge will manage all array assembly.${NC}"
+
 echo "Downloading PoolForge..."
 RELEASE_URL="https://github.com/Paul-Cradduck/PoolForge/releases/latest/download/poolforge-linux-amd64"
 if curl -fsSL "$RELEASE_URL" -o /usr/local/bin/poolforge 2>/dev/null; then
@@ -115,6 +129,19 @@ LimitNOFILE=65536
 WantedBy=multi-user.target
 EOF
 systemctl daemon-reload
+
+# Phase 5: Back up existing metadata for safe upgrade
+METADATA_FILE="/var/lib/poolforge/metadata.json"
+BACKUP_FILE="/var/lib/poolforge/metadata.json.pre-phase5-backup"
+if [ -f "$METADATA_FILE" ] && [ ! -f "$BACKUP_FILE" ]; then
+  cp "$METADATA_FILE" "$BACKUP_FILE"
+  echo -e "${GREEN}✓ Metadata backed up to $BACKUP_FILE${NC}"
+fi
+
+# Phase 5: Ensure boot config has AUTO -all
+if command -v poolforge &>/dev/null; then
+  poolforge boot-config-regenerate 2>/dev/null || true
+fi
 
 echo ""
 echo -e "${GREEN}══════════════════════════════════════${NC}"

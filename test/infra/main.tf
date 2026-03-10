@@ -92,7 +92,7 @@ resource "aws_ebs_volume" "disks" {
 
 resource "aws_volume_attachment" "disks" {
   count       = length(var.volume_sizes)
-  device_name = "/dev/sd${["f","g","h","i","j","k"][count.index]}"
+  device_name = "/dev/sd${["f","g","h","i","j","k","l","m","n","o"][count.index]}"
   volume_id   = aws_ebs_volume.disks[count.index].id
   instance_id = aws_instance.test.id
 }
