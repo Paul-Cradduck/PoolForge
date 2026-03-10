@@ -289,22 +289,21 @@ function renderPool(summary, status) {
   });
   sliceMapHTML += '</div>';
   poolDisks.forEach(d => {
-    const w = ((d.CapacityBytes||0) / maxCap * 100);
     sliceMapHTML += `<div style="display:flex;align-items:center;margin:3px 0;gap:0.5rem">`;
     sliceMapHTML += `<div style="width:5.5rem;font-size:0.75rem;text-align:right;flex-shrink:0;color:${d.State==='failed'?'var(--red)':'var(--text)'}">${d.Device.replace('/dev/','')}<br><span style="color:var(--muted)">${fmtBytes(d.CapacityBytes)}</span></div>`;
-    sliceMapHTML += `<div style="flex:1;display:flex;height:1.5rem;border-radius:3px;overflow:hidden;background:rgba(134,134,134,0.12);max-width:${w}%">`;
+    sliceMapHTML += `<div style="flex:1;display:flex;height:1.5rem;border-radius:3px;overflow:hidden;background:rgba(134,134,134,0.12)">`;
     const slices = (d.Slices||[]).sort((a,b) => a.TierIndex - b.TierIndex);
     const totalSlice = slices.reduce((s,sl) => s + (sl.SizeBytes||0), 0);
     const diskCap = d.CapacityBytes || totalSlice;
     slices.forEach(sl => {
-      const pct = diskCap > 0 ? (sl.SizeBytes / diskCap * 100) : 0;
+      const pct = maxCap > 0 ? (sl.SizeBytes / maxCap * 100) : 0;
       const color = tierColors[sl.TierIndex % tierColors.length];
       const opacity = d.State === 'failed' ? '0.3' : '0.85';
       sliceMapHTML += `<div style="width:${pct}%;background:${color};opacity:${opacity};display:flex;align-items:center;justify-content:center;font-size:0.6rem;color:#fff;font-weight:600" title="Tier ${sl.TierIndex}: ${fmtBytes(sl.SizeBytes)}">T${sl.TierIndex}</div>`;
     });
     const freeBytes = diskCap - totalSlice;
     if (freeBytes > diskCap * 0.01) {
-      const freePct = (freeBytes / diskCap * 100);
+      const freePct = maxCap > 0 ? (freeBytes / maxCap * 100) : 0;
       sliceMapHTML += `<div style="width:${freePct}%;background:rgba(134,134,134,0.08);display:flex;align-items:center;justify-content:center;font-size:0.6rem;color:var(--muted)" title="Free: ${fmtBytes(freeBytes)}">free</div>`;
     }
     sliceMapHTML += '</div></div>';
