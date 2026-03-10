@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"sort"
 	"strings"
 	"syscall"
@@ -60,6 +61,14 @@ func (e *engineImpl) StartPool(ctx context.Context, poolName string, force bool)
 		detail, err := e.raid.GetArrayDetail(arr.Device)
 		if err == nil && strings.Contains(detail.State, "degraded") {
 			ar.State = ArrayDegraded
+
+			// Remove any failed members first so re-add can work
+			for _, m := range detail.Members {
+				if strings.Contains(m.State, "faulty") || strings.Contains(m.State, "removed") {
+					exec.Command("mdadm", "--manage", arr.Device, "--remove", m.Device).Run()
+				}
+			}
+
 			// Scan for matching partitions to re-add
 			matches, _ := e.raid.ScanSuperblocks(arr.UUID)
 			activeMemberSet := make(map[string]bool)
