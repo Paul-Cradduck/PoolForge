@@ -291,7 +291,7 @@ function renderPool(summary, status) {
   poolDisks.forEach(d => {
     sliceMapHTML += `<div style="display:flex;align-items:center;margin:3px 0;gap:0.5rem">`;
     sliceMapHTML += `<div style="width:5.5rem;font-size:0.75rem;text-align:right;flex-shrink:0;color:${d.State==='failed'?'var(--red)':'var(--text)'}">${d.Device.replace('/dev/','')}<br><span style="color:var(--muted)">${fmtBytes(d.CapacityBytes)}</span></div>`;
-    sliceMapHTML += `<div style="flex:1;display:flex;height:1.5rem;border-radius:3px;overflow:hidden;background:rgba(134,134,134,0.12)">`;
+    sliceMapHTML += `<div style="flex:1;display:flex;height:1.5rem;border-radius:3px;overflow:hidden;background:none">`;
     const slices = (d.Slices||[]).sort((a,b) => a.TierIndex - b.TierIndex);
     const totalSlice = slices.reduce((s,sl) => s + (sl.SizeBytes||0), 0);
     const diskCap = d.CapacityBytes || totalSlice;
