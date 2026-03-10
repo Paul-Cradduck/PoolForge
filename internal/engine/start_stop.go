@@ -63,11 +63,7 @@ func (e *engineImpl) StartPool(ctx context.Context, poolName string, force bool)
 			ar.State = ArrayDegraded
 
 			// Remove any failed members first so re-add can work
-			for _, m := range detail.Members {
-				if strings.Contains(m.State, "faulty") || strings.Contains(m.State, "removed") {
-					exec.Command("mdadm", "--manage", arr.Device, "--remove", m.Device).Run()
-				}
-			}
+			exec.Command("mdadm", "--manage", arr.Device, "--remove", "failed").Run()
 
 			// Scan for matching partitions to re-add
 			matches, _ := e.raid.ScanSuperblocks(arr.UUID)
