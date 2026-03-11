@@ -46,8 +46,8 @@ func (e *engineImpl) StartPool(ctx context.Context, poolName string, force bool)
 		// Assemble by UUID if available, otherwise by device name + members
 		if arr.UUID != "" {
 			if _, err := e.raid.AssembleArrayBySuperblock(arr.UUID); err != nil {
-				// Check if already active
-				if detail, derr := e.raid.GetArrayDetail(arr.Device); derr != nil || !strings.Contains(detail.State, "active") {
+				// If array is already active, that's fine
+				if _, derr := e.raid.GetArrayDetail(arr.Device); derr != nil {
 					return nil, fmt.Errorf("failed to assemble %s (UUID %s): %w", arr.Device, arr.UUID, err)
 				}
 			}
@@ -55,7 +55,7 @@ func (e *engineImpl) StartPool(ctx context.Context, poolName string, force bool)
 			members := make([]string, len(arr.Members))
 			copy(members, arr.Members)
 			if err := e.raid.AssembleArray(arr.Device, members); err != nil {
-				if detail, derr := e.raid.GetArrayDetail(arr.Device); derr != nil || !strings.Contains(detail.State, "active") {
+				if _, derr := e.raid.GetArrayDetail(arr.Device); derr != nil {
 					return nil, fmt.Errorf("failed to assemble %s by members: %w", arr.Device, err)
 				}
 			}
@@ -399,14 +399,14 @@ func (e *engineImpl) AssembleArrays(ctx context.Context, poolName string) error 
 		if arr.UUID != "" {
 			if _, err := e.raid.AssembleArrayBySuperblock(arr.UUID); err != nil {
 				if err2 := e.raid.AssembleArray(arr.Device, arr.Members); err2 != nil {
-					if detail, derr := e.raid.GetArrayDetail(arr.Device); derr != nil || !strings.Contains(detail.State, "active") {
+					if _, derr := e.raid.GetArrayDetail(arr.Device); derr != nil {
 						return fmt.Errorf("assemble %s: %w", arr.Device, err2)
 					}
 				}
 			}
 		} else {
 			if err := e.raid.AssembleArray(arr.Device, arr.Members); err != nil {
-				if detail, derr := e.raid.GetArrayDetail(arr.Device); derr != nil || !strings.Contains(detail.State, "active") {
+				if _, derr := e.raid.GetArrayDetail(arr.Device); derr != nil {
 					return fmt.Errorf("assemble %s: %w", arr.Device, err)
 				}
 			}

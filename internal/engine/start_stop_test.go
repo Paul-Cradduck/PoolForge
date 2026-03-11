@@ -21,11 +21,15 @@ type mockRAID struct {
 	scanMatches    []storage.SuperblockMatch
 	readdFail      bool
 	assembleFail   bool
+	detailFail     bool
 	uuid           string
 }
 
 func (m *mockRAID) CreateArray(opts storage.RAIDCreateOpts) (*storage.RAIDArrayInfo, error) { return nil, nil }
 func (m *mockRAID) GetArrayDetail(device string) (*storage.RAIDArrayDetail, error) {
+	if m.detailFail {
+		return nil, fmt.Errorf("no such device")
+	}
 	return &storage.RAIDArrayDetail{Device: device, State: m.detailState, Members: m.detailMembers, UUID: m.uuid}, nil
 }
 func (m *mockRAID) AssembleArray(device string, members []string) error { return nil }
@@ -343,7 +347,7 @@ func TestStartPoolDegradedReAddFailsFallback(t *testing.T) {
 func TestStartPoolAssemblyFailure(t *testing.T) {
 	pool := makeTestPool(PoolOffline)
 	meta := &mockMeta{pools: map[string]*Pool{pool.ID: pool}}
-	raid := &mockRAID{assembleFail: true}
+	raid := &mockRAID{assembleFail: true, detailFail: true}
 	eng := newTestEngine(raid, meta)
 
 	_, err := eng.StartPool(context.Background(), "mypool", true)
