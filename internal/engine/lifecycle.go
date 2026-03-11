@@ -283,6 +283,10 @@ func (e *engineImpl) AddDisk(ctx context.Context, poolID string, disk string) er
 		return err
 	}
 	newDiskSlices := ComputeDiskSlices(newInfo.CapacityBytes, newTiers)
+	// Pause udev to prevent mdadm auto-assembly of new partitions
+	exec.Command("udevadm", "control", "--stop-exec-queue").Run()
+	defer exec.Command("udevadm", "control", "--start-exec-queue").Run()
+
 	var newDiskSliceInfos []SliceInfo
 	var offset uint64 = 1048576
 	for _, sl := range newDiskSlices {
