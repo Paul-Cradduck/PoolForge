@@ -481,18 +481,24 @@ function getChipValue(groupId) {
   return sel ? sel.dataset.dev : '';
 }
 
+function getChipValues(groupId) {
+  return [...document.querySelectorAll('#' + groupId + ' .disk-chip.selected')].map(c => c.dataset.dev);
+}
+
 async function showAddDisk(poolID) {
   const disks = await api('/disks');
   const free = disks.filter(d => !d.inUse);
   const previewDiv = '<div id="addDiskPreview" style="margin-top:0.75rem"></div>';
   showAction('Add Disk',
-    (free.length ? chipSelector('addDiskSel', free, 'Select an available disk') : '<p style="color:var(--muted)">No available disks</p>') + previewDiv,
+    (free.length ? chipSelector('addDiskSel', free, 'Select disks to add (click multiple)') : '<p style="color:var(--muted)">No available disks</p>') + previewDiv,
     async () => {
-      const dev = getChipValue('addDiskSel');
-      if (!dev) return toast('Select a disk', true);
-      await api('/pools/' + poolID + '/disks', { method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({disk: dev}) });
-      toast('Adding disk — reshape in progress'); closeModal('actionModal'); refresh();
+      const devs = getChipValues('addDiskSel');
+      if (!devs.length) return toast('Select at least one disk', true);
+      for (const dev of devs) {
+        await api('/pools/' + poolID + '/disks', { method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({disk: dev}) });
+      }
+      toast('Adding ' + devs.length + ' disk(s) — reshape in progress'); closeModal('actionModal'); refresh();
       // Auto-refresh while expanding
       const expandInterval = setInterval(async () => {
         await refresh();
@@ -503,25 +509,24 @@ async function showAddDisk(poolID) {
     });
   setTimeout(() => {
     document.querySelectorAll('#addDiskSel .disk-chip').forEach(chip => {
-      const origClick = chip.onclick;
       chip.onclick = async function(e) {
-        chipSelect('addDiskSel', this);
-        const dev = this.dataset.dev;
+        this.classList.toggle('selected');
+        const devs = getChipValues('addDiskSel');
         const el = document.getElementById('addDiskPreview');
+        if (!devs.length) { el.innerHTML = ''; return; }
         el.innerHTML = '<span style="color:var(--muted);font-size:0.8rem">Calculating...</span>';
         try {
+          const dev = devs[devs.length - 1];
           const p = await api('/preview-add', { method: 'POST', headers: {'Content-Type':'application/json'},
             body: JSON.stringify({poolID, disk: dev}) });
           el.innerHTML = `
             <div style="background:var(--surface-deep);border:1px solid var(--border);border-radius:4px;padding:0.75rem;font-size:0.85rem">
+              <div style="margin-bottom:0.5rem;color:var(--muted)">${devs.length} disk(s) selected: ${devs.map(d=>d.replace('/dev/','')).join(', ')}</div>
               <div style="display:flex;justify-content:space-between;margin-bottom:0.5rem">
                 <span style="color:var(--muted)">Current capacity</span><span>${fmtBytes(p.currentCapacity)}</span>
               </div>
               <div style="display:flex;justify-content:space-between;margin-bottom:0.5rem">
-                <span style="color:var(--muted)">After adding ${dev.replace('/dev/','')}</span><span style="color:var(--green)">${fmtBytes(p.projectedCapacity)}</span>
-              </div>
-              <div style="display:flex;justify-content:space-between;margin-bottom:0.5rem">
-                <span style="color:var(--muted)">Capacity gain</span><span style="color:var(--green)">+${fmtBytes(p.gainBytes)}</span>
+                <span style="color:var(--muted)">Preview (last selected)</span><span style="color:var(--green)">${fmtBytes(p.projectedCapacity)}</span>
               </div>
               <div style="display:flex;justify-content:space-between">
                 <span style="color:var(--muted)">Tiers</span><span>${p.currentTiers} → ${p.projectedTiers}</span>

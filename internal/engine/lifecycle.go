@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/poolforge/poolforge/internal/storage"
@@ -324,12 +325,29 @@ func (e *engineImpl) AddDisk(ctx context.Context, poolID string, disk string) er
 					return err
 				}
 				pool.RAIDArrays[i].Members = append(pool.RAIDArrays[i].Members, sl.PartitionDevice)
-				newCount := len(pool.RAIDArrays[i].Members)
+				// Get actual member count from mdadm (metadata Members may be stale)
+				detail, err := e.raid.GetArrayDetail(pool.RAIDArrays[i].Device)
+				if err != nil {
+					return fmt.Errorf("get detail for %s: %w", pool.RAIDArrays[i].Device, err)
+				}
+				activeCount := 0
+				for _, m := range detail.Members {
+					if !strings.Contains(m.State, "spare") {
+						activeCount++
+					}
+				}
+				newCount := activeCount + 1 // +1 for the spare we just added
 				newLevel, _ := SelectRAIDLevel(pool.ParityMode, newCount)
 				if err := e.raid.ReshapeArray(pool.RAIDArrays[i].Device, newCount, newLevel); err != nil {
 					return err
 				}
 				pool.RAIDArrays[i].RAIDLevel = newLevel
+				// Update members from detail so metadata is accurate
+				var allMembers []string
+				for _, m := range detail.Members {
+					allMembers = append(allMembers, m.Device)
+				}
+				pool.RAIDArrays[i].Members = allMembers
 				pool.CapacityTiers[pool.RAIDArrays[i].TierIndex].EligibleDiskCount = newCount
 			}
 		}
