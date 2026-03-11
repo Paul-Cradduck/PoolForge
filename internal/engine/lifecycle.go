@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"time"
 
@@ -285,18 +286,24 @@ func (e *engineImpl) AddDisk(ctx context.Context, poolID string, disk string) er
 	newDiskSlices := ComputeDiskSlices(newInfo.CapacityBytes, newTiers)
 	var newDiskSliceInfos []SliceInfo
 	var offset uint64 = 1048576
+
+	// Temporarily disable mdadm udev auto-assembly during partitioning.
+	// Without this, partprobe triggers udev → mdadm --incremental which
+	// grabs new partitions into existing arrays before we can add them.
+	const assemblyRule = "/lib/udev/rules.d/64-md-raid-assembly.rules"
+	const assemblyRuleOff = "/lib/udev/rules.d/64-md-raid-assembly.rules.disabled"
+	os.Rename(assemblyRule, assemblyRuleOff)
+	exec.Command("udevadm", "control", "--reload-rules").Run()
+	defer func() {
+		os.Rename(assemblyRuleOff, assemblyRule)
+		exec.Command("udevadm", "control", "--reload-rules").Run()
+	}()
+
 	for _, sl := range newDiskSlices {
 		part, err := e.disk.CreatePartition(disk, offset, sl.SizeBytes)
 		if err != nil {
 			return err
 		}
-		// Prevent mdadm incremental auto-assembly via udev rules.
-		// When partprobe notifies the kernel of new partitions, udev fires
-		// mdadm --incremental which can grab partitions into existing arrays
-		// before PoolForge adds them explicitly. Zeroing superblocks and
-		// signatures ensures mdadm finds nothing to assemble.
-		exec.Command("mdadm", "--zero-superblock", part.Device).Run()
-		exec.Command("wipefs", "-af", part.Device).Run()
 		newDiskSliceInfos = append(newDiskSliceInfos, SliceInfo{
 			TierIndex:       sl.TierIndex,
 			PartitionNumber: part.Number,
