@@ -418,5 +418,10 @@ func (e *engineImpl) MountPool(ctx context.Context, poolName string) error {
 		return err
 	}
 	lvPath := fmt.Sprintf("/dev/%s/%s", pool.VolumeGroup, pool.LogicalVolume)
-	return e.fs.MountFilesystem(lvPath, pool.MountPoint)
+	if err := e.fs.MountFilesystem(lvPath, pool.MountPoint); err != nil {
+		return err
+	}
+	pool.OperationalStatus = PoolRunning
+	e.meta.SavePool(pool)
+	return nil
 }
