@@ -52,14 +52,26 @@ func (e *engineImpl) StartPool(ctx context.Context, poolName string, force bool)
 				}
 			}
 		} else {
-			// No UUID — try scan-based assembly first, then member-based
-			out, scanErr := exec.Command("mdadm", "--assemble", "--scan", arr.Device).CombinedOutput()
-			if scanErr != nil {
-				members := make([]string, len(arr.Members))
-				copy(members, arr.Members)
-				if err := e.raid.AssembleArray(arr.Device, members); err != nil {
-					if _, derr := e.raid.GetArrayDetail(arr.Device); derr != nil {
-						return nil, fmt.Errorf("failed to assemble %s by members: %w (scan: %s)", arr.Device, err, string(out))
+			// No UUID — try member-based assembly, then scan superblocks to find UUID
+			members := make([]string, len(arr.Members))
+			copy(members, arr.Members)
+			if err := e.raid.AssembleArray(arr.Device, members); err != nil {
+				if _, derr := e.raid.GetArrayDetail(arr.Device); derr != nil {
+					// Members stale — scan superblocks for any member to get UUID
+					uuid := ""
+					for _, m := range arr.Members {
+						if u := e.getUUIDFromSuperblock(m); u != "" {
+							uuid = u
+							break
+						}
+					}
+					if uuid == "" {
+						return nil, fmt.Errorf("failed to assemble %s by members: %w", arr.Device, err)
+					}
+					if _, err2 := e.raid.AssembleArrayBySuperblock(uuid); err2 != nil {
+						if _, derr2 := e.raid.GetArrayDetail(arr.Device); derr2 != nil {
+							return nil, fmt.Errorf("failed to assemble %s (discovered UUID %s): %w", arr.Device, uuid, err2)
+						}
 					}
 				}
 			}
@@ -274,6 +286,43 @@ func abs64(x int64) int64 {
 		return -x
 	}
 	return x
+}
+
+// getUUIDFromSuperblock finds the array UUID by examining superblocks of all
+// partitions that share the same partition number as the given member device.
+func (e *engineImpl) getUUIDFromSuperblock(memberDev string) string {
+	partNum := extractPartitionNumber(memberDev)
+	entries, err := os.ReadDir("/sys/block")
+	if err != nil {
+		return ""
+	}
+	for _, ent := range entries {
+		name := ent.Name()
+		if strings.HasPrefix(name, "loop") || strings.HasPrefix(name, "dm-") || strings.HasPrefix(name, "md") || strings.HasPrefix(name, "ram") {
+			continue
+		}
+		// Build candidate partition path
+		var candidate string
+		if strings.Contains(name, "nvme") {
+			candidate = fmt.Sprintf("/dev/%sp%d", name, partNum)
+		} else {
+			candidate = fmt.Sprintf("/dev/%s%d", name, partNum)
+		}
+		if _, err := os.Stat(candidate); err != nil {
+			continue
+		}
+		out, err := exec.Command("mdadm", "--examine", candidate).Output()
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(string(out), "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "Array UUID :") {
+				return strings.TrimSpace(strings.TrimPrefix(line, "Array UUID :"))
+			}
+		}
+	}
+	return ""
 }
 
 // reconcileDeviceNames updates all disk/partition device paths from mdadm --detail.
