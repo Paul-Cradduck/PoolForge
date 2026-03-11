@@ -273,6 +273,8 @@ function renderPool(summary, status) {
   ).join('');
 
   const rebuilding = arrays.some(a => a.State === 'rebuilding');
+  const expanding = pool.State === 'expanding';
+  if (expanding || rebuilding) { setTimeout(() => watchRebuild(pool.ID), 100); }
 
   const tierColors = ['var(--secondary)','rgba(154,111,255,1)','rgba(243,0,178,1)','var(--yellow)','var(--cyan)','var(--accent)'];
   const poolDisks = pool.Disks || [];
@@ -490,7 +492,14 @@ async function showAddDisk(poolID) {
       if (!dev) return toast('Select a disk', true);
       await api('/pools/' + poolID + '/disks', { method: 'POST', headers: {'Content-Type':'application/json'},
         body: JSON.stringify({disk: dev}) });
-      toast('Disk added'); closeModal('actionModal'); refresh();
+      toast('Adding disk — reshape in progress'); closeModal('actionModal'); refresh();
+      // Auto-refresh while expanding
+      const expandInterval = setInterval(async () => {
+        await refresh();
+        const pools = await api('/pools');
+        const p = pools.find(x => x.ID === poolID);
+        if (!p || p.State !== 'expanding') { clearInterval(expandInterval); }
+      }, 5000);
     });
   setTimeout(() => {
     document.querySelectorAll('#addDiskSel .disk-chip').forEach(chip => {

@@ -181,13 +181,16 @@ func (s *Server) handlePoolDisks(w http.ResponseWriter, r *http.Request, poolID 
 			httpError(w, err, http.StatusBadRequest)
 			return
 		}
-		if err := s.engine.AddDisk(r.Context(), poolID, req.Disk); err != nil {
-			s.logError("add disk %s: %v", req.Disk, err)
-			httpError(w, err, http.StatusInternalServerError)
-			return
-		}
-		s.logInfo("disk %s added to pool", req.Disk)
-		jsonResp(w, map[string]string{"status": "added"})
+		// Run add-disk async so the UI responds immediately
+		disk := req.Disk
+		go func() {
+			if err := s.engine.AddDisk(context.Background(), poolID, disk); err != nil {
+				s.logError("add disk %s: %v", disk, err)
+			} else {
+				s.logInfo("disk %s added to pool", disk)
+			}
+		}()
+		jsonResp(w, map[string]string{"status": "adding", "message": "Adding disk " + disk + " — reshape in progress"})
 	case http.MethodDelete:
 		device := ""
 		if len(parts) > 2 {
