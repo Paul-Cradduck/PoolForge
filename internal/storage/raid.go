@@ -74,7 +74,7 @@ func (r *raidManager) GetArrayDetail(device string) (*RAIDArrayDetail, error) {
 		}
 	}
 	// Parse member devices
-	memberRe := regexp.MustCompile(`\d+\s+\d+\s+\d+\s+\d+\s+(\S+)\s+(/dev/\S+)`)
+	memberRe := regexp.MustCompile(`^\s*\d+\s+\d+\s+\d+\s+[\d-]+\s+(.+?)\s+(/dev/\S+)\s*$`)
 	for _, line := range lines {
 		matches := memberRe.FindStringSubmatch(line)
 		if len(matches) == 3 {
