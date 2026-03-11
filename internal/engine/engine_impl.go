@@ -136,6 +136,7 @@ func (e *engineImpl) CreatePool(ctx context.Context, req CreatePoolRequest) (*Po
 			TierIndex: tiers[ti].Index,
 			State:     ArrayHealthy,
 			Members:   members,
+			UUID:      func() string { u, _ := e.raid.GetArrayUUID(info.Device); return u }(),
 		})
 	}
 

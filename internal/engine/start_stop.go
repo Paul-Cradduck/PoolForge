@@ -52,11 +52,15 @@ func (e *engineImpl) StartPool(ctx context.Context, poolName string, force bool)
 				}
 			}
 		} else {
-			members := make([]string, len(arr.Members))
-			copy(members, arr.Members)
-			if err := e.raid.AssembleArray(arr.Device, members); err != nil {
-				if _, derr := e.raid.GetArrayDetail(arr.Device); derr != nil {
-					return nil, fmt.Errorf("failed to assemble %s by members: %w", arr.Device, err)
+			// No UUID — try scan-based assembly first, then member-based
+			out, scanErr := exec.Command("mdadm", "--assemble", "--scan", arr.Device).CombinedOutput()
+			if scanErr != nil {
+				members := make([]string, len(arr.Members))
+				copy(members, arr.Members)
+				if err := e.raid.AssembleArray(arr.Device, members); err != nil {
+					if _, derr := e.raid.GetArrayDetail(arr.Device); derr != nil {
+						return nil, fmt.Errorf("failed to assemble %s by members: %w (scan: %s)", arr.Device, err, string(out))
+					}
 				}
 			}
 		}
