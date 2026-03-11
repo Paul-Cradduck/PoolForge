@@ -298,14 +298,23 @@ func (e *engineImpl) reconcileDeviceNames(pool *Pool) {
 				if pool.Disks[di].Slices[si].TierIndex != arr.TierIndex {
 					continue
 				}
-				oldPart := pool.Disks[di].Slices[si].PartitionDevice
+				partNum := pool.Disks[di].Slices[si].PartitionNumber
 				for _, m := range detail.Members {
-					// Match by partition number suffix pattern
-					if partitionMatchesDisk(m.Device, pool.Disks[di].Device, pool.Disks[di].Slices[si].PartitionNumber) {
-						if m.Device != oldPart {
-							pool.Disks[di].Slices[si].PartitionDevice = m.Device
-							// Update disk device from partition device
-							pool.Disks[di].Device = diskFromPartition(m.Device)
+					// Match by partition number only (handles device renames)
+					mNum := extractPartitionNumber(m.Device)
+					if mNum == partNum && diskFromPartition(m.Device) != pool.Disks[di].Device {
+						// Check if this member's disk matches by capacity
+						newDisk := diskFromPartition(m.Device)
+						if info, err := e.disk.GetDiskInfo(newDisk); err == nil {
+							const tol = 50 * 1024 * 1024
+							diff := int64(info.CapacityBytes) - int64(pool.Disks[di].CapacityBytes)
+							if diff < 0 {
+								diff = -diff
+							}
+							if diff <= tol {
+								pool.Disks[di].Slices[si].PartitionDevice = m.Device
+								pool.Disks[di].Device = newDisk
+							}
 						}
 					}
 				}
@@ -333,6 +342,23 @@ func diskFromPartition(partDev string) string {
 	}
 	// Handle sd: /dev/sda1 → /dev/sda
 	return strings.TrimRight(partDev, "0123456789")
+}
+
+// extractPartitionNumber gets the partition number from a device path.
+func extractPartitionNumber(partDev string) int {
+	// /dev/sda1 → 1, /dev/nvme0n1p2 → 2
+	s := partDev
+	if strings.Contains(s, "nvme") {
+		idx := strings.LastIndex(s, "p")
+		if idx >= 0 {
+			s = s[idx+1:]
+		}
+	} else {
+		s = strings.TrimLeft(s, "/devabcdfghijklmnopqrstuvwxyz")
+	}
+	var n int
+	fmt.Sscanf(s, "%d", &n)
+	return n
 }
 
 func (e *engineImpl) verifyArraysStopped(pool *Pool) {
@@ -401,6 +427,8 @@ func (e *engineImpl) AssembleArrays(ctx context.Context, poolName string) error 
 			}
 		}
 	}
+	e.reconcileDeviceNames(pool)
+	e.meta.SavePool(pool)
 	return nil
 }
 
