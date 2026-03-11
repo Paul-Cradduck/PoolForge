@@ -138,6 +138,12 @@ func (s *Server) handlePool(w http.ResponseWriter, r *http.Request) {
 		s.handleStopPool(w, r, poolID)
 	case "autostart":
 		s.handleSetAutoStart(w, r, poolID)
+	case "assemble":
+		s.handleAssemble(w, r, poolID)
+	case "activate-lvm":
+		s.handleActivateLVM(w, r, poolID)
+	case "mount":
+		s.handleMount(w, r, poolID)
 	default:
 		w.WriteHeader(http.StatusNotFound)
 	}
@@ -841,4 +847,46 @@ func (s *Server) handleSetAutoStart(w http.ResponseWriter, r *http.Request, pool
 		"auto_start": *req.AutoStart,
 		"message":    msg,
 	})
+}
+
+func (s *Server) handleAssemble(w http.ResponseWriter, r *http.Request, poolNameOrID string) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	if err := s.engine.AssembleArrays(r.Context(), poolNameOrID); err != nil {
+		s.logError("assemble arrays for '%s': %v", poolNameOrID, err)
+		httpError(w, err, http.StatusInternalServerError)
+		return
+	}
+	s.logInfo("arrays assembled for pool '%s'", poolNameOrID)
+	jsonResp(w, map[string]string{"status": "ok", "message": "RAID arrays assembled"})
+}
+
+func (s *Server) handleActivateLVM(w http.ResponseWriter, r *http.Request, poolNameOrID string) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	if err := s.engine.ActivateLVM(r.Context(), poolNameOrID); err != nil {
+		s.logError("activate LVM for '%s': %v", poolNameOrID, err)
+		httpError(w, err, http.StatusInternalServerError)
+		return
+	}
+	s.logInfo("LVM activated for pool '%s'", poolNameOrID)
+	jsonResp(w, map[string]string{"status": "ok", "message": "LVM volume group activated"})
+}
+
+func (s *Server) handleMount(w http.ResponseWriter, r *http.Request, poolNameOrID string) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	if err := s.engine.MountPool(r.Context(), poolNameOrID); err != nil {
+		s.logError("mount pool '%s': %v", poolNameOrID, err)
+		httpError(w, err, http.StatusInternalServerError)
+		return
+	}
+	s.logInfo("pool '%s' mounted", poolNameOrID)
+	jsonResp(w, map[string]string{"status": "ok", "message": "Filesystem mounted"})
 }

@@ -328,6 +328,12 @@ function renderPool(summary, status) {
       <button class="danger" onclick="deletePool('${pool.ID}','${pool.Name}')">✕ Delete</button>
     </h2>
     ${isExternal ? '<div class="external-warning">⚠ External Enclosure — requires manual start/stop</div>' : ''}
+    ${opStatus !== 'running' ? `<div style="margin-bottom:0.5rem;display:flex;gap:0.4rem;flex-wrap:wrap">
+      <span style="font-size:0.75rem;color:var(--muted);align-self:center">Recovery:</span>
+      <button class="start-stop-btn start" style="font-size:0.7rem;padding:0.2rem 0.6rem" onclick="recoveryAction('${pool.Name}','assemble')">⚙ Assemble Arrays</button>
+      <button class="start-stop-btn start" style="font-size:0.7rem;padding:0.2rem 0.6rem" onclick="recoveryAction('${pool.Name}','activate-lvm')">⚙ Activate LVM</button>
+      <button class="start-stop-btn start" style="font-size:0.7rem;padding:0.2rem 0.6rem" onclick="recoveryAction('${pool.Name}','mount')">⚙ Mount</button>
+    </div>` : ''}
     <div style="font-size:0.8rem;color:var(--muted);margin-bottom:0.75rem">
       ID: ${pool.ID} &nbsp;|&nbsp; ${fmtParity(pool.ParityMode)} &nbsp;|&nbsp;
       Mount: ${pool.MountPoint}
@@ -631,6 +637,13 @@ async function startPool(name) {
       await api('/pools/' + name + '/start?force=true', { method: 'POST' });
     }
     toast('Pool started'); refresh();
+  } catch(e) { toast(e.message, true); }
+}
+
+async function recoveryAction(name, action) {
+  try {
+    const res = await api('/pools/' + name + '/' + action, { method: 'POST' });
+    toast('✓ ' + (res.message || action + ' done')); refresh();
   } catch(e) { toast(e.message, true); }
 }
 

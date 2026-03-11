@@ -47,6 +47,9 @@ func (m *mockEngine) StopPool(ctx context.Context, poolName string) error {
 func (m *mockEngine) SetAutoStart(ctx context.Context, poolName string, autoStart bool) error {
 	return m.autoStartErr
 }
+func (m *mockEngine) AssembleArrays(ctx context.Context, poolName string) error { return nil }
+func (m *mockEngine) ActivateLVM(ctx context.Context, poolName string) error { return nil }
+func (m *mockEngine) MountPool(ctx context.Context, poolName string) error { return nil }
 
 func newTestServer(eng *mockEngine) *Server {
 	return NewWithAuth(eng, "admin", "secret")

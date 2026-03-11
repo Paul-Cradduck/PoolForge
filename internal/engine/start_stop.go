@@ -356,3 +356,59 @@ func (e *engineImpl) verifyAutoDirective() {
 }
 
 
+
+func (e *engineImpl) AssembleArrays(ctx context.Context, poolName string) error {
+	pool, err := e.resolvePoolByName(poolName)
+	if err != nil {
+		return err
+	}
+	sort.Slice(pool.RAIDArrays, func(i, j int) bool {
+		return pool.RAIDArrays[i].TierIndex < pool.RAIDArrays[j].TierIndex
+	})
+	for _, arr := range pool.RAIDArrays {
+		if arr.UUID != "" {
+			if _, err := e.raid.AssembleArrayBySuperblock(arr.UUID); err != nil {
+				if err2 := e.raid.AssembleArray(arr.Device, arr.Members); err2 != nil {
+					return fmt.Errorf("assemble %s: %w", arr.Device, err2)
+				}
+			}
+		} else {
+			if err := e.raid.AssembleArray(arr.Device, arr.Members); err != nil {
+				return fmt.Errorf("assemble %s: %w", arr.Device, err)
+			}
+		}
+		// Remove failed and re-add
+		exec.Command("mdadm", "--manage", arr.Device, "--remove", "failed").Run()
+		matches, _ := e.raid.ScanSuperblocks(arr.UUID)
+		detail, _ := e.raid.GetArrayDetail(arr.Device)
+		if detail != nil {
+			active := make(map[string]bool)
+			for _, m := range detail.Members {
+				active[m.Device] = true
+			}
+			for _, match := range matches {
+				if !active[match.PartitionDevice] {
+					e.raid.ReAddMember(arr.Device, match.PartitionDevice)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func (e *engineImpl) ActivateLVM(ctx context.Context, poolName string) error {
+	pool, err := e.resolvePoolByName(poolName)
+	if err != nil {
+		return err
+	}
+	return e.lvm.ActivateVolumeGroup(pool.VolumeGroup)
+}
+
+func (e *engineImpl) MountPool(ctx context.Context, poolName string) error {
+	pool, err := e.resolvePoolByName(poolName)
+	if err != nil {
+		return err
+	}
+	lvPath := fmt.Sprintf("/dev/%s/%s", pool.VolumeGroup, pool.LogicalVolume)
+	return e.fs.MountFilesystem(lvPath, pool.MountPoint)
+}

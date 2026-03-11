@@ -29,6 +29,11 @@ type EngineService interface {
 	StartPool(ctx context.Context, poolName string, force bool) (*StartPoolResult, error)
 	StopPool(ctx context.Context, poolName string) error
 	SetAutoStart(ctx context.Context, poolName string, autoStart bool) error
+
+	// Phase 5: Recovery actions
+	AssembleArrays(ctx context.Context, poolName string) error
+	ActivateLVM(ctx context.Context, poolName string) error
+	MountPool(ctx context.Context, poolName string) error
 }
 
 // MetadataStore defines the persistence interface.
