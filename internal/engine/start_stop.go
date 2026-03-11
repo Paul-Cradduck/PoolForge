@@ -293,31 +293,47 @@ func (e *engineImpl) reconcileDeviceNames(pool *Pool) {
 		pool.RAIDArrays[i].Members = newMembers
 
 		// Update disk slice partition devices
-		for di := range pool.Disks {
-			for si := range pool.Disks[di].Slices {
-				if pool.Disks[di].Slices[si].TierIndex != arr.TierIndex {
-					continue
-				}
-				partNum := pool.Disks[di].Slices[si].PartitionNumber
-				for _, m := range detail.Members {
-					// Match by partition number only (handles device renames)
-					mNum := extractPartitionNumber(m.Device)
-					if mNum == partNum && diskFromPartition(m.Device) != pool.Disks[di].Device {
-						// Check if this member's disk matches by capacity
-						newDisk := diskFromPartition(m.Device)
-						if info, err := e.disk.GetDiskInfo(newDisk); err == nil {
-							const tol = 50 * 1024 * 1024
-							diff := int64(info.CapacityBytes) - int64(pool.Disks[di].CapacityBytes)
-							if diff < 0 {
-								diff = -diff
-							}
-							if diff <= tol {
-								pool.Disks[di].Slices[si].PartitionDevice = m.Device
-								pool.Disks[di].Device = newDisk
-							}
-						}
+		// Build set of current pool disk devices
+		poolDiskDevs := make(map[string]bool)
+		for _, d := range pool.Disks {
+			poolDiskDevs[d.Device] = true
+		}
+		for _, m := range detail.Members {
+			mDisk := diskFromPartition(m.Device)
+			if poolDiskDevs[mDisk] {
+				continue // already known
+			}
+			// This member's disk is not in pool metadata — find which pool disk it replaced
+			for di := range pool.Disks {
+				if poolDiskDevs[pool.Disks[di].Device] {
+					// Check if this disk's device still exists
+					if _, err := e.disk.GetDiskInfo(pool.Disks[di].Device); err == nil {
+						continue // disk still exists at old path
 					}
 				}
+				// Check capacity match
+				info, err := e.disk.GetDiskInfo(mDisk)
+				if err != nil {
+					continue
+				}
+				diff := int64(info.CapacityBytes) - int64(pool.Disks[di].CapacityBytes)
+				if diff < 0 {
+					diff = -diff
+				}
+				if diff > 50*1024*1024 {
+					continue
+				}
+				// Found the renamed disk — update device and all slice partitions
+				oldDev := pool.Disks[di].Device
+				pool.Disks[di].Device = mDisk
+				for si := range pool.Disks[di].Slices {
+					oldPart := pool.Disks[di].Slices[si].PartitionDevice
+					pNum := extractPartitionNumber(oldPart)
+					pool.Disks[di].Slices[si].PartitionDevice = fmt.Sprintf("%s%d", mDisk, pNum)
+				}
+				delete(poolDiskDevs, oldDev)
+				poolDiskDevs[mDisk] = true
+				break
 			}
 		}
 	}
