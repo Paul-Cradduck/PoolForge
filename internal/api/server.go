@@ -175,22 +175,32 @@ func (s *Server) handlePoolDisks(w http.ResponseWriter, r *http.Request, poolID 
 	switch r.Method {
 	case http.MethodPost:
 		var req struct {
-			Disk string `json:"disk"`
+			Disk  string   `json:"disk"`
+			Disks []string `json:"disks"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			httpError(w, err, http.StatusBadRequest)
 			return
 		}
-		// Run add-disk async so the UI responds immediately
-		disk := req.Disk
+		disks := req.Disks
+		if len(disks) == 0 && req.Disk != "" {
+			disks = []string{req.Disk}
+		}
+		if len(disks) == 0 {
+			httpError(w, fmt.Errorf("no disks specified"), http.StatusBadRequest)
+			return
+		}
+		// Run add-disk async, processing disks sequentially so reshapes don't overlap
 		go func() {
-			if err := s.engine.AddDisk(context.Background(), poolID, disk); err != nil {
-				s.logError("add disk %s: %v", disk, err)
-			} else {
+			for _, disk := range disks {
+				if err := s.engine.AddDisk(context.Background(), poolID, disk); err != nil {
+					s.logError("add disk %s: %v", disk, err)
+					return
+				}
 				s.logInfo("disk %s added to pool", disk)
 			}
 		}()
-		jsonResp(w, map[string]string{"status": "adding", "message": "Adding disk " + disk + " — reshape in progress"})
+		jsonResp(w, map[string]string{"status": "adding", "message": fmt.Sprintf("Adding %d disk(s) — reshape in progress", len(disks))})
 	case http.MethodDelete:
 		device := ""
 		if len(parts) > 2 {

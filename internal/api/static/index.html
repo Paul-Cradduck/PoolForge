@@ -494,10 +494,8 @@ async function showAddDisk(poolID) {
     async () => {
       const devs = getChipValues('addDiskSel');
       if (!devs.length) return toast('Select at least one disk', true);
-      for (const dev of devs) {
-        await api('/pools/' + poolID + '/disks', { method: 'POST', headers: {'Content-Type':'application/json'},
-          body: JSON.stringify({disk: dev}) });
-      }
+      await api('/pools/' + poolID + '/disks', { method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({disks: devs}) });
       toast('Adding ' + devs.length + ' disk(s) — reshape in progress'); closeModal('actionModal'); refresh();
       // Auto-refresh while expanding
       const expandInterval = setInterval(async () => {
