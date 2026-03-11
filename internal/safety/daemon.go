@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -305,15 +306,16 @@ func (d *Daemon) bootPools() {
 			d.cfg.MetadataStore.SavePool(pool)
 			d.logs.Info("pool %s: skipped (manual start required)", pool.Name)
 		} else {
-			// Check if arrays are actually active before marking as running
-			active := false
-			for _, a := range pool.RAIDArrays {
-				if _, err := os.Stat(a.Device); err == nil {
-					active = true
-					break
+			// Verify the full stack is actually up: arrays + LVM + mount
+			mounted := false
+			if pool.MountPoint != "" {
+				if _, err := os.Stat(pool.MountPoint); err == nil {
+					// Check if actually mounted (not just directory exists)
+					data, _ := os.ReadFile("/proc/mounts")
+					mounted = strings.Contains(string(data), pool.MountPoint)
 				}
 			}
-			if active {
+			if mounted {
 				pool.OperationalStatus = engine.PoolRunning
 			} else {
 				pool.OperationalStatus = engine.PoolOffline

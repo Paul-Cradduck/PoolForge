@@ -290,7 +290,11 @@ func (e *engineImpl) AddDisk(ctx context.Context, poolID string, disk string) er
 		if err != nil {
 			return err
 		}
-		// Prevent mdadm auto-assembly via udev
+		// Prevent mdadm incremental auto-assembly via udev rules.
+		// When partprobe notifies the kernel of new partitions, udev fires
+		// mdadm --incremental which can grab partitions into existing arrays
+		// before PoolForge adds them explicitly. Zeroing superblocks and
+		// signatures ensures mdadm finds nothing to assemble.
 		exec.Command("mdadm", "--zero-superblock", part.Device).Run()
 		exec.Command("wipefs", "-af", part.Device).Run()
 		newDiskSliceInfos = append(newDiskSliceInfos, SliceInfo{
