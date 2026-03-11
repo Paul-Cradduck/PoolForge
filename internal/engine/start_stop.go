@@ -45,15 +45,19 @@ func (e *engineImpl) StartPool(ctx context.Context, poolName string, force bool)
 
 		// Assemble by UUID if available, otherwise by device name + members
 		if arr.UUID != "" {
-			_, err := e.raid.AssembleArrayBySuperblock(arr.UUID)
-			if err != nil {
-				return nil, fmt.Errorf("failed to assemble %s (UUID %s): %w", arr.Device, arr.UUID, err)
+			if _, err := e.raid.AssembleArrayBySuperblock(arr.UUID); err != nil {
+				// Check if already active
+				if detail, derr := e.raid.GetArrayDetail(arr.Device); derr != nil || !strings.Contains(detail.State, "active") {
+					return nil, fmt.Errorf("failed to assemble %s (UUID %s): %w", arr.Device, arr.UUID, err)
+				}
 			}
 		} else {
 			members := make([]string, len(arr.Members))
 			copy(members, arr.Members)
 			if err := e.raid.AssembleArray(arr.Device, members); err != nil {
-				return nil, fmt.Errorf("failed to assemble %s by members: %w", arr.Device, err)
+				if detail, derr := e.raid.GetArrayDetail(arr.Device); derr != nil || !strings.Contains(detail.State, "active") {
+					return nil, fmt.Errorf("failed to assemble %s by members: %w", arr.Device, err)
+				}
 			}
 		}
 
@@ -369,12 +373,16 @@ func (e *engineImpl) AssembleArrays(ctx context.Context, poolName string) error 
 		if arr.UUID != "" {
 			if _, err := e.raid.AssembleArrayBySuperblock(arr.UUID); err != nil {
 				if err2 := e.raid.AssembleArray(arr.Device, arr.Members); err2 != nil {
-					return fmt.Errorf("assemble %s: %w", arr.Device, err2)
+					if detail, derr := e.raid.GetArrayDetail(arr.Device); derr != nil || !strings.Contains(detail.State, "active") {
+						return fmt.Errorf("assemble %s: %w", arr.Device, err2)
+					}
 				}
 			}
 		} else {
 			if err := e.raid.AssembleArray(arr.Device, arr.Members); err != nil {
-				return fmt.Errorf("assemble %s: %w", arr.Device, err)
+				if detail, derr := e.raid.GetArrayDetail(arr.Device); derr != nil || !strings.Contains(detail.State, "active") {
+					return fmt.Errorf("assemble %s: %w", arr.Device, err)
+				}
 			}
 		}
 		// Remove failed and re-add
