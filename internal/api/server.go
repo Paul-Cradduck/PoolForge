@@ -314,6 +314,10 @@ func (s *Server) handleRebuildSSE(w http.ResponseWriter, r *http.Request, poolID
 			flusher.Flush()
 
 			if !rebuilding {
+				// Stay open while pool is still expanding (gap between sequential reshapes)
+				if status.Pool.State == engine.PoolExpanding {
+					continue
+				}
 				fmt.Fprintf(w, "event: done\ndata: complete\n\n")
 				flusher.Flush()
 				return

@@ -698,7 +698,7 @@ function watchRebuild(poolID) {
           <div class="progress-bar"><div class="fill" style="width:${pct}%"></div></div></div>`;
       }
     }
-    if (html) el.innerHTML = html; else el.innerHTML = '<div style="font-size:0.8rem;color:var(--green)">✓ Rebuild complete</div>';
+    if (html) el.innerHTML = html; else if (evt.pool.State === 'expanding') el.innerHTML = '<div style="font-size:0.8rem;color:var(--muted)">Waiting for next reshape...</div>'; else el.innerHTML = '<div style="font-size:0.8rem;color:var(--green)">✓ Rebuild complete</div>';
   };
   es.addEventListener('done', () => { es.close(); delete activeSSE[poolID]; refresh(); });
   es.addEventListener('error', () => { es.close(); delete activeSSE[poolID]; el.innerHTML = ''; });
