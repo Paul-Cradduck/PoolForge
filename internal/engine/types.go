@@ -145,11 +145,13 @@ type SnapshotConfig struct {
 }
 
 type Snapshot struct {
-	Name      string `json:"name"`
-	CreatedAt int64  `json:"created_at"`
-	ExpiresAt int64  `json:"expires_at,omitempty"`
-	SizeBytes uint64 `json:"size_bytes"`
-	MountPath string `json:"mount_path,omitempty"`
+	Name           string  `json:"name"`
+	CreatedAt      int64   `json:"created_at"`
+	ExpiresAt      int64   `json:"expires_at,omitempty"`
+	SizeBytes      uint64  `json:"size_bytes"`
+	AllocatedBytes uint64  `json:"allocated_bytes,omitempty"`
+	UsedPercent    float64 `json:"used_percent,omitempty"`
+	MountPath      string  `json:"mount_path,omitempty"`
 }
 
 type SnapshotSchedule struct {

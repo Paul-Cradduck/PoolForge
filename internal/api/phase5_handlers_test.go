@@ -42,6 +42,10 @@ func (m *mockEngine) CreateSnapshot(ctx context.Context, poolID string, name str
 func (m *mockEngine) DeleteSnapshot(ctx context.Context, poolID string, name string) error { return nil }
 func (m *mockEngine) ListSnapshots(ctx context.Context, poolID string) ([]engine.Snapshot, error) { return nil, nil }
 func (m *mockEngine) SetSnapshotSchedule(ctx context.Context, poolID string, schedule engine.SnapshotSchedule) error { return nil }
+func (m *mockEngine) MountSnapshot(ctx context.Context, poolID string, name string) (string, error) { return "", nil }
+func (m *mockEngine) UnmountSnapshot(ctx context.Context, poolID string, name string) error { return nil }
+func (m *mockEngine) RestoreSnapshot(ctx context.Context, poolID string, name string) error { return nil }
+func (m *mockEngine) RenameSnapshot(ctx context.Context, poolID string, oldName, newName string) error { return nil }
 
 func (m *mockEngine) StartPool(ctx context.Context, poolName string, force bool) (*engine.StartPoolResult, error) {
 	if m.startErr != nil {

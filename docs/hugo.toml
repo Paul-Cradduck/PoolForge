@@ -1,0 +1,22 @@
+baseURL = 'https://paul-cradduck.github.io/PoolForge/'
+languageCode = 'en-us'
+title = 'PoolForge'
+
+[module]
+  [[module.imports]]
+    path = 'github.com/McShelby/hugo-theme-relearn'
+
+[params]
+  description = 'Hybrid RAID storage manager for Ubuntu LTS'
+  themeVariant = ['auto', 'relearn-dark', 'relearn-light']
+  disableLandingPageButton = true
+  editURL = 'https://github.com/Paul-Cradduck/PoolForge/edit/main/docs/content/'
+  showVisitedLinks = true
+  disableAssetsBusting = true
+
+[outputs]
+  home = ['html', 'rss', 'search']
+
+[markup]
+  [markup.highlight]
+    style = 'monokai'

@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -32,6 +35,7 @@ type Server struct {
 	shares    *sharing.ShareManager
 	pairing   *replication.PairingManager
 	sync      *replication.SyncManager
+	version   string
 }
 
 func (s *Server) SetAlerter(a *safety.Alerter)              { s.alerter = a }
@@ -41,6 +45,7 @@ func (s *Server) SetCollector(c *monitoring.Collector)        { s.collector = c 
 func (s *Server) SetShares(sm *sharing.ShareManager)          { s.shares = sm }
 func (s *Server) SetPairing(pm *replication.PairingManager)   { s.pairing = pm }
 func (s *Server) SetSync(sm *replication.SyncManager)         { s.sync = sm }
+func (s *Server) SetVersion(v string)                         { s.version = v }
 
 func New(eng engine.EngineService) *Server {
 	return NewWithAuth(eng, "", "")
@@ -87,6 +92,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/pair/nodes/", s.handlePairNodeDelete)
 	s.mux.HandleFunc("/api/sync/jobs", s.handleSyncJobs)
 	s.mux.HandleFunc("/api/sync/jobs/", s.handleSyncJob)
+	s.mux.HandleFunc("/api/version", func(w http.ResponseWriter, r *http.Request) {
+		jsonResp(w, map[string]string{"version": s.version})
+	})
 
 	sub, _ := fs.Sub(staticFS, "static")
 	s.mux.Handle("/", http.FileServer(http.FS(sub)))
@@ -156,6 +164,8 @@ func (s *Server) handlePool(w http.ResponseWriter, r *http.Request) {
 		s.handleReplaceDisk(w, r, poolID)
 	case "rebuild":
 		s.handleRebuildSSE(w, r, poolID)
+	case "files":
+		s.handleFiles(w, r, poolID)
 	case "shares":
 		s.handleShares(w, r, poolID, parts)
 	case "snapshots":
@@ -1016,10 +1026,23 @@ func (s *Server) handleProtocolStatus(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSnapshots(w http.ResponseWriter, r *http.Request, poolID string, parts []string) {
 	snapName := ""
 	if len(parts) > 2 {
-		snapName = parts[2]
+		sub := strings.SplitN(parts[2], "/", 2)
+		snapName = sub[0]
+		if len(sub) > 1 {
+			parts = append(parts, sub[1])
+		}
 	}
 	switch r.Method {
 	case http.MethodGet:
+		// GET /api/pools/{id}/snapshots/{name}/browse?path=...
+		action := ""
+		if len(parts) > 3 {
+			action = parts[3]
+		}
+		if snapName != "" && action == "browse" {
+			s.handleSnapshotBrowse(w, r, poolID, snapName)
+			return
+		}
 		snaps, err := s.engine.ListSnapshots(r.Context(), poolID)
 		if err != nil {
 			httpError(w, err, http.StatusInternalServerError)
@@ -1041,6 +1064,56 @@ func (s *Server) handleSnapshots(w http.ResponseWriter, r *http.Request, poolID 
 				return
 			}
 			jsonResp(w, map[string]string{"status": "updated"})
+			return
+		}
+		// /api/pools/{id}/snapshots/{name}/mount
+		action := ""
+		if len(parts) > 3 {
+			action = parts[3]
+		}
+		if snapName != "" && action != "" {
+			switch action {
+			case "mount":
+				mountPath, err := s.engine.MountSnapshot(r.Context(), poolID, snapName)
+				if err != nil {
+					httpError(w, err, http.StatusInternalServerError)
+					return
+				}
+				s.logInfo("snapshot %q mounted at %s", snapName, mountPath)
+				jsonResp(w, map[string]string{"status": "mounted", "mount_path": mountPath})
+			case "unmount":
+				if err := s.engine.UnmountSnapshot(r.Context(), poolID, snapName); err != nil {
+					httpError(w, err, http.StatusInternalServerError)
+					return
+				}
+				s.logInfo("snapshot %q unmounted", snapName)
+				jsonResp(w, map[string]string{"status": "unmounted"})
+			case "restore":
+				if err := s.engine.RestoreSnapshot(r.Context(), poolID, snapName); err != nil {
+					httpError(w, err, http.StatusInternalServerError)
+					return
+				}
+				s.logInfo("snapshot %q restored — pool data reverted", snapName)
+				jsonResp(w, map[string]string{"status": "restored"})
+			case "rename":
+				var req struct {
+					NewName string `json:"new_name"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.NewName == "" {
+					httpError(w, fmt.Errorf("new_name required"), http.StatusBadRequest)
+					return
+				}
+				if err := s.engine.RenameSnapshot(r.Context(), poolID, snapName, req.NewName); err != nil {
+					httpError(w, err, http.StatusInternalServerError)
+					return
+				}
+				s.logInfo("snapshot %q renamed to %q", snapName, req.NewName)
+				jsonResp(w, map[string]string{"status": "renamed", "new_name": req.NewName})
+			case "restore-file":
+				s.handleSnapshotRestoreFile(w, r, poolID, snapName)
+			default:
+				w.WriteHeader(http.StatusNotFound)
+			}
 			return
 		}
 		var req struct {
@@ -1070,6 +1143,247 @@ func (s *Server) handleSnapshots(w http.ResponseWriter, r *http.Request, poolID 
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
+}
+
+func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request, poolID string) {
+	pool, err := s.engine.GetPool(r.Context(), poolID)
+	if err != nil {
+		httpError(w, err, http.StatusNotFound)
+		return
+	}
+	mountPoint := pool.MountPoint
+	relPath := r.URL.Query().Get("path")
+	if relPath == "" {
+		relPath = "/"
+	}
+	cleaned := filepath.Clean("/" + relPath)
+	absPath := filepath.Join(mountPoint, cleaned)
+	if !strings.HasPrefix(absPath, mountPoint) {
+		httpError(w, fmt.Errorf("invalid path"), http.StatusBadRequest)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		info, err := os.Stat(absPath)
+		if err != nil {
+			httpError(w, fmt.Errorf("path not found"), http.StatusNotFound)
+			return
+		}
+		if !info.IsDir() {
+			httpError(w, fmt.Errorf("not a directory"), http.StatusBadRequest)
+			return
+		}
+		entries, err := os.ReadDir(absPath)
+		if err != nil {
+			httpError(w, err, http.StatusInternalServerError)
+			return
+		}
+		type fileEntry struct {
+			Name    string `json:"name"`
+			IsDir   bool   `json:"is_dir"`
+			Size    int64  `json:"size"`
+			ModTime int64  `json:"mod_time"`
+		}
+		result := make([]fileEntry, 0, len(entries))
+		for _, e := range entries {
+			fi, _ := e.Info()
+			sz, mt := int64(0), int64(0)
+			if fi != nil {
+				sz = fi.Size()
+				mt = fi.ModTime().Unix()
+			}
+			result = append(result, fileEntry{Name: e.Name(), IsDir: e.IsDir(), Size: sz, ModTime: mt})
+		}
+		jsonResp(w, map[string]interface{}{"path": cleaned, "entries": result})
+
+	case http.MethodPost:
+		var req struct {
+			Action string `json:"action"` // "mkdir" or "mkfile"
+			Name   string `json:"name"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			httpError(w, err, http.StatusBadRequest)
+			return
+		}
+		if req.Name == "" || strings.Contains(req.Name, "/") || strings.Contains(req.Name, "..") {
+			httpError(w, fmt.Errorf("invalid name"), http.StatusBadRequest)
+			return
+		}
+		target := filepath.Join(absPath, req.Name)
+		switch req.Action {
+		case "mkdir":
+			err = os.MkdirAll(target, 0755)
+		case "mkfile":
+			var f *os.File
+			f, err = os.Create(target)
+			if f != nil {
+				f.Close()
+			}
+		default:
+			httpError(w, fmt.Errorf("action must be mkdir or mkfile"), http.StatusBadRequest)
+			return
+		}
+		if err != nil {
+			httpError(w, err, http.StatusInternalServerError)
+			return
+		}
+		jsonResp(w, map[string]string{"status": "ok"})
+
+	case http.MethodDelete:
+		name := r.URL.Query().Get("name")
+		if name == "" || strings.Contains(name, "/") || strings.Contains(name, "..") {
+			httpError(w, fmt.Errorf("invalid name"), http.StatusBadRequest)
+			return
+		}
+		target := filepath.Join(absPath, name)
+		if !strings.HasPrefix(target, mountPoint) {
+			httpError(w, fmt.Errorf("invalid path"), http.StatusBadRequest)
+			return
+		}
+		if err := os.RemoveAll(target); err != nil {
+			httpError(w, err, http.StatusInternalServerError)
+			return
+		}
+		jsonResp(w, map[string]string{"status": "deleted"})
+
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) handleSnapshotBrowse(w http.ResponseWriter, r *http.Request, poolID, snapName string) {
+	snaps, err := s.engine.ListSnapshots(r.Context(), poolID)
+	if err != nil {
+		httpError(w, err, http.StatusInternalServerError)
+		return
+	}
+	var mountPath string
+	for _, snap := range snaps {
+		if snap.Name == snapName {
+			mountPath = snap.MountPath
+			break
+		}
+	}
+	if mountPath == "" {
+		httpError(w, fmt.Errorf("snapshot not mounted"), http.StatusBadRequest)
+		return
+	}
+
+	relPath := r.URL.Query().Get("path")
+	if relPath == "" {
+		relPath = "/"
+	}
+	// Sanitize: prevent path traversal
+	cleaned := filepath.Clean("/" + relPath)
+	absPath := filepath.Join(mountPath, cleaned)
+	if !strings.HasPrefix(absPath, mountPath) {
+		httpError(w, fmt.Errorf("invalid path"), http.StatusBadRequest)
+		return
+	}
+
+	info, err := os.Stat(absPath)
+	if err != nil {
+		httpError(w, fmt.Errorf("path not found"), http.StatusNotFound)
+		return
+	}
+	if !info.IsDir() {
+		httpError(w, fmt.Errorf("not a directory"), http.StatusBadRequest)
+		return
+	}
+
+	entries, err := os.ReadDir(absPath)
+	if err != nil {
+		httpError(w, err, http.StatusInternalServerError)
+		return
+	}
+
+	type fileEntry struct {
+		Name    string `json:"name"`
+		IsDir   bool   `json:"is_dir"`
+		Size    int64  `json:"size"`
+		ModTime int64  `json:"mod_time"`
+	}
+	result := make([]fileEntry, 0, len(entries))
+	for _, e := range entries {
+		fi, _ := e.Info()
+		size := int64(0)
+		modTime := int64(0)
+		if fi != nil {
+			size = fi.Size()
+			modTime = fi.ModTime().Unix()
+		}
+		result = append(result, fileEntry{
+			Name:    e.Name(),
+			IsDir:   e.IsDir(),
+			Size:    size,
+			ModTime: modTime,
+		})
+	}
+	jsonResp(w, map[string]interface{}{"path": cleaned, "entries": result})
+}
+
+func (s *Server) handleSnapshotRestoreFile(w http.ResponseWriter, r *http.Request, poolID, snapName string) {
+	var req struct {
+		Path string `json:"path"` // relative path within snapshot, e.g. "/testdata/file1.bin"
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Path == "" {
+		httpError(w, fmt.Errorf("path required"), http.StatusBadRequest)
+		return
+	}
+
+	// Get snapshot mount path
+	snaps, err := s.engine.ListSnapshots(r.Context(), poolID)
+	if err != nil {
+		httpError(w, err, http.StatusInternalServerError)
+		return
+	}
+	var snapMount string
+	for _, snap := range snaps {
+		if snap.Name == snapName {
+			snapMount = snap.MountPath
+			break
+		}
+	}
+	if snapMount == "" {
+		httpError(w, fmt.Errorf("snapshot not mounted"), http.StatusBadRequest)
+		return
+	}
+
+	// Get pool mount path
+	pool, err := s.engine.GetPool(r.Context(), poolID)
+	if err != nil {
+		httpError(w, err, http.StatusNotFound)
+		return
+	}
+
+	cleaned := filepath.Clean("/" + req.Path)
+	src := filepath.Join(snapMount, cleaned)
+	dst := filepath.Join(pool.MountPoint, cleaned)
+
+	if !strings.HasPrefix(src, snapMount) || !strings.HasPrefix(dst, pool.MountPoint) {
+		httpError(w, fmt.Errorf("invalid path"), http.StatusBadRequest)
+		return
+	}
+
+	// Check source exists
+	if _, err := os.Stat(src); err != nil {
+		httpError(w, fmt.Errorf("source not found in snapshot"), http.StatusNotFound)
+		return
+	}
+
+	// Ensure parent dir exists in destination
+	os.MkdirAll(filepath.Dir(dst), 0755)
+
+	// Use cp -a to preserve permissions and handle both files and dirs
+	out, err := exec.Command("cp", "-a", src, dst).CombinedOutput()
+	if err != nil {
+		httpError(w, fmt.Errorf("restore failed: %s", string(out)), http.StatusInternalServerError)
+		return
+	}
+
+	s.logInfo("restored %q from snapshot %q", cleaned, snapName)
+	jsonResp(w, map[string]string{"status": "restored", "path": cleaned})
 }
 
 // --- Phase 6: Pairing ---

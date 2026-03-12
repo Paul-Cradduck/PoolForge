@@ -15,6 +15,7 @@
   --green: rgba(130,229,80,1); --yellow: rgba(237,153,9,1); --red: rgba(224,62,62,1);
   --blue: rgba(48,117,229,1); --cyan: rgba(30,190,190,1);
   --code-bg: rgba(45,45,45,1);
+  --sidebar-bg: rgba(22,22,30,1); --sidebar-hover: rgba(40,40,55,1); --sidebar-active: rgba(50,50,70,1);
 }
 * { margin:0; padding:0; box-sizing:border-box; }
 body {
@@ -57,6 +58,7 @@ button.danger:hover { background: var(--red); color: var(--text-bright); }
   background: var(--surface); border: 1px solid var(--border);
   border-radius: 12px; padding: 1.25rem; margin-bottom: 1rem;
   box-shadow: 0 2px 8px rgba(0,0,0,0.3); transition: all 0.35s ease;
+  overflow-x: auto;
 }
 .card h2 {
   font-size: 1rem; font-weight: 500; margin-bottom: 0.75rem;
@@ -152,34 +154,96 @@ tbody tr:nth-child(even) td { background: rgba(134,134,134,0.045); }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: rgba(208,208,208,0.3); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(204,204,204,0.5); }
+
+/* Sidebar layout */
+.app-layout { display: flex; min-height: 100vh; }
+.sidebar { position: fixed; left: 0; top: 0; bottom: 0; width: 250px; background: var(--sidebar-bg); border-right: 1px solid var(--border-light); overflow-y: auto; z-index: 50; display: flex; flex-direction: column; }
+.sidebar-header { padding: 0.85rem 1.1rem; border-bottom: 1px solid var(--border-light); display: flex; align-items: center; gap: 0.6rem; }
+.sidebar-header .logo { width: 1.75rem; height: 1.75rem; background: var(--primary); border-radius: 4px; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.85rem; color: rgba(32,32,32,1); }
+.sidebar-header h1 { font-size: 1.05rem; font-weight: 600; color: var(--text-bright); }
+.sidebar-nav { list-style: none; padding: 0.5rem 0; flex: 1; }
+.nav-item { padding: 0.55rem 1.1rem; cursor: pointer; border-left: 3px solid transparent; color: var(--muted); font-size: 0.85rem; display: flex; align-items: center; gap: 0.55rem; transition: all 0.15s; }
+.nav-item:hover { background: var(--sidebar-hover); color: var(--text); }
+.nav-item.active { border-left-color: var(--primary); background: var(--sidebar-active); color: var(--text-bright); font-weight: 500; }
+.nav-item .icon { width: 1.2rem; text-align: center; flex-shrink: 0; }
+.main-area { margin-left: 250px; flex: 1; }
+.page { display: none; }
+.page.active { display: block; }
 </style>
 </head>
 <body>
 
+<div class="app-layout">
+<nav class="sidebar">
+  <div class="sidebar-header"><div class="logo">P</div><h1>PoolForge</h1><span id="versionBadge" style="font-size:0.65rem;color:var(--muted);margin-left:auto"></span></div>
+  <ul class="sidebar-nav">
+    <li class="nav-item active" onclick="navigate('dashboard')"><span class="icon">📊</span> Dashboard</li>
+    <li class="nav-item" onclick="navigate('disks')"><span class="icon">💾</span> Disks</li>
+    <li class="nav-item" onclick="navigate('files')"><span class="icon">📂</span> Files</li>
+    <li class="nav-item" onclick="navigate('shares')"><span class="icon">📁</span> Shares</li>
+    <li class="nav-item" onclick="navigate('snapshots')"><span class="icon">📸</span> Snapshots</li>
+    <li class="nav-item" onclick="navigate('replication')"><span class="icon">🔄</span> Replication</li>
+    <li class="nav-item" onclick="navigate('monitoring')"><span class="icon">📈</span> Monitoring</li>
+    <li class="nav-item" onclick="navigate('safety')"><span class="icon">🛡️</span> Safety</li>
+    <li class="nav-item" onclick="navigate('settings')"><span class="icon">⚙️</span> Settings</li>
+  </ul>
+</nav>
+<div class="main-area">
 <div class="header">
-  <div class="logo">P</div>
-  <h1>PoolForge</h1>
+  <h1 id="pageTitle">Dashboard</h1>
+  <span style="flex:1"></span>
+  <button onclick="refresh()">↻ Refresh</button>
 </div>
-
 <div class="container">
-  <div class="toolbar">
-    <button class="primary" onclick="showCreateModal()">+ Create Pool</button>
-    <button onclick="importPool()">📥 Import</button>
-    <button onclick="refresh()">↻ Refresh</button>
-    <span style="flex:1"></span>
-    <button id="tabPoolsBtn" class="primary" onclick="switchTab('pools')">Pools</button>
-    <button id="tabMonitorBtn" onclick="switchTab('monitor')">📊 Monitoring</button>
-    <button id="tabSyncBtn" onclick="switchTab('sync')">🔄 Sync</button>
-  </div>
-  <div id="tabPools">
+  <!-- Dashboard page -->
+  <div id="page-dashboard" class="page active">
+    <div style="display:flex;gap:0.5rem;margin-bottom:1rem;flex-wrap:wrap">
+      <button class="primary" onclick="showCreateModal()">+ Create Pool</button>
+      <button onclick="importPool()">📥 Import</button>
+    </div>
     <div id="pools"></div>
+  </div>
+  <!-- Disks page -->
+  <div id="page-disks" class="page">
+    <div id="disksPage"></div>
+  </div>
+  <!-- Files page -->
+  <div id="page-files" class="page">
+    <div id="filesPage"></div>
+  </div>
+  <!-- Shares page -->
+  <div id="page-shares" class="page">
     <div id="shares"></div>
     <div id="users"></div>
-    <div id="safety"></div>
-    <div id="alerts"></div>
-    <div id="logs"></div>
   </div>
-  <div id="tabMonitor" style="display:none">
+  <!-- Snapshots page -->
+  <div id="page-snapshots" class="page">
+    <div id="snapshotsPage"></div>
+  </div>
+  <!-- Replication page -->
+  <div id="page-replication" class="page">
+    <div class="card">
+      <h2>🔗 Paired Nodes <span style="flex:1"></span><button onclick="pairInit()">+ Pair New Node</button></h2>
+      <table id="pairedNodesTable"><tr><th>Name</th><th>Host</th><th>Paired</th><th></th></tr></table>
+      <div id="noPairedNodes" style="text-align:center;padding:16px;color:var(--muted);font-size:13px">No paired nodes</div>
+      <div id="pairingCode" style="display:none;margin-top:12px;padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:8px">
+        <div style="font-size:13px;color:var(--muted)">Pairing code (expires in 10 minutes):</div>
+        <div id="pairingCodeValue" style="font-size:24px;font-weight:700;font-family:monospace;margin:8px 0"></div>
+        <div style="font-size:12px;color:var(--muted)">Run on remote node: <code>poolforge pair join --code &lt;code&gt;</code></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>📋 Sync Jobs <span style="flex:1"></span><button onclick="showSyncJobModal()">+ Create Job</button></h2>
+      <table id="syncJobsTable"><tr><th>Name</th><th>Remote</th><th>Mode</th><th>Schedule</th><th>Last Run</th><th></th></tr></table>
+      <div id="noSyncJobs" style="text-align:center;padding:16px;color:var(--muted);font-size:13px">No sync jobs</div>
+    </div>
+    <div class="card">
+      <h2>📜 Recent Activity</h2>
+      <div id="syncHistory" style="font-size:12px;font-family:monospace"></div>
+    </div>
+  </div>
+  <!-- Monitoring page -->
+  <div id="page-monitoring" class="page">
     <div class="card">
       <h2>📊 Real-Time Monitoring
         <span style="flex:1"></span>
@@ -218,25 +282,21 @@ tbody tr:nth-child(even) td { background: rgba(134,134,134,0.045); }
       <div id="noClients" style="text-align:center;padding:16px;color:var(--muted);font-size:13px">No active connections</div>
     </div>
   </div>
-  <div id="tabSync" style="display:none">
+  <!-- Safety page -->
+  <div id="page-safety" class="page">
+    <div id="safety"></div>
+    <div id="alerts"></div>
+    <div id="logs"></div>
+  </div>
+  <!-- Settings page -->
+  <div id="page-settings" class="page">
     <div class="card">
-      <h2>🔗 Paired Nodes <span style="flex:1"></span><button onclick="pairInit()">+ Pair New Node</button></h2>
-      <table id="pairedNodesTable"><tr><th>Name</th><th>Host</th><th>Paired</th><th></th></tr></table>
-      <div id="noPairedNodes" style="text-align:center;padding:16px;color:var(--muted);font-size:13px">No paired nodes</div>
-      <div id="pairingCode" style="display:none;margin-top:12px;padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:8px">
-        <div style="font-size:13px;color:var(--muted)">Pairing code (expires in 10 minutes):</div>
-        <div id="pairingCodeValue" style="font-size:24px;font-weight:700;font-family:monospace;margin:8px 0"></div>
-        <div style="font-size:12px;color:var(--muted)">Run on remote node: <code>poolforge pair join --code &lt;code&gt;</code></div>
-      </div>
+      <h2>⚙️ Pool Settings</h2>
+      <div id="settingsPoolList"></div>
     </div>
     <div class="card">
-      <h2>📋 Sync Jobs <span style="flex:1"></span><button onclick="showSyncJobModal()">+ Create Job</button></h2>
-      <table id="syncJobsTable"><tr><th>Name</th><th>Remote</th><th>Mode</th><th>Schedule</th><th>Last Run</th><th></th></tr></table>
-      <div id="noSyncJobs" style="text-align:center;padding:16px;color:var(--muted);font-size:13px">No sync jobs</div>
-    </div>
-    <div class="card">
-      <h2>📜 Recent Activity</h2>
-      <div id="syncHistory" style="font-size:12px;font-family:monospace"></div>
+      <h2>ℹ️ System Info</h2>
+      <div id="settingsSystemInfo" style="font-size:0.85rem"></div>
     </div>
   </div>
 </div>
@@ -345,6 +405,33 @@ tbody tr:nth-child(even) td { background: rgba(134,134,134,0.045); }
 <script>
 const API = '/api';
 let availableDisks = [];
+let currentPage = 'dashboard';
+
+const pageTitles = {
+  dashboard: 'Dashboard', disks: 'Disks', files: 'Files', shares: 'Shares', snapshots: 'Snapshots',
+  replication: 'Replication', monitoring: 'Monitoring', safety: 'Safety', settings: 'Settings'
+};
+
+function navigate(page) {
+  currentPage = page;
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  const el = document.getElementById('page-' + page);
+  if (el) el.classList.add('active');
+  const nav = document.querySelector(`.nav-item[onclick="navigate('${page}')"]`);
+  if (nav) nav.classList.add('active');
+  document.getElementById('pageTitle').textContent = pageTitles[page] || page;
+  if (page === 'dashboard') refresh();
+  if (page === 'disks') refreshDisksPage();
+  if (page === 'files') refreshFilesPage();
+  if (page === 'shares') { refreshShares(); refreshUsers(); }
+  if (page === 'snapshots') refreshSnapshotsPage();
+  if (page === 'replication') refreshSync();
+  if (page === 'monitoring') { startMonitoringSSE(); refreshClients(); refreshProtocolStatus(); }
+  else stopMonitoringSSE();
+  if (page === 'safety') { refreshSafety(); refreshAlerts(); refreshLogs(); }
+  if (page === 'settings') refreshSettings();
+}
 
 async function api(path, opts) {
   const r = await fetch(API + path, opts);
@@ -380,9 +467,12 @@ async function refresh() {
     }
     let html = '';
     for (const p of pools) {
-      const status = await api('/pools/' + p.ID);
+      const [status, snaps] = await Promise.all([
+        api('/pools/' + p.ID),
+        api('/pools/' + p.ID + '/snapshots').catch(() => [])
+      ]);
       poolStatusCache[p.ID] = status;
-      html += renderPool(p, status);
+      html += renderPool(p, status, snaps);
     }
     el.innerHTML = html;
   } catch (e) { toast(e.message, true); }
@@ -392,7 +482,7 @@ function fmtParity(mode) {
   return mode === 1 ? 'SHR-2' : 'SHR-1';
 }
 
-function renderPool(summary, status) {
+function renderPool(summary, status, snaps) {
   const pool = status.Pool;
   const arrays = status.ArrayStatuses || [];
   const disks = status.DiskStatuses || [];
@@ -489,6 +579,8 @@ function renderPool(summary, status) {
       const sumArrayCap = arrays.reduce((s,a) => s + (a.CapacityBytes||0), 0);
       const raidParity = slicedTotal - sumArrayCap;
       const overhead = sumArrayCap - usable;
+      const snapReserved = (snaps||[]).reduce((s,sn) => s + (sn.allocated_bytes||0), 0);
+      const snapUsed = (snaps||[]).reduce((s,sn) => s + (sn.size_bytes||0), 0);
       const usablePct = rawTotal > 0 ? (usable / rawTotal * 100).toFixed(0) : 0;
       const parityPct = rawTotal > 0 ? (raidParity / rawTotal * 100).toFixed(0) : 0;
       const usedOfUsable = usable > 0 ? (used / usable * 100) : 0;
@@ -504,12 +596,14 @@ function renderPool(summary, status) {
           <div><span style="color:var(--muted)">Usable:</span> ${fmtBytes(usable)} <span style="color:var(--green)">(${usablePct}%)</span></div>
           <div><span style="color:var(--muted)">Used:</span> ${fmtBytes(used)}${usable > 0 ? ` (${(used/usable*100).toFixed(1)}%)` : ''}</div>
           <div><span style="color:var(--muted)">Protection:</span> ${fmtBytes(raidParity)} <span style="color:var(--secondary)">(${parityPct}%)</span></div>
+          ${snapReserved > 0 ? `<div><span style="color:var(--muted)">Snapshots:</span> <span style="color:rgba(154,111,255,1)">${fmtBytes(snapUsed)}</span> / ${fmtBytes(snapReserved)} reserved</div>` : ''}
           ${overhead > 0 ? `<div><span style="color:var(--muted)">Overhead:</span> ${fmtBytes(overhead)}</div>` : ''}
           ${unallocated > 0 ? `<div><span style="color:var(--muted)">Expansion:</span> ${fmtBytes(unallocated)}</div>` : ''}
         </div>
         <div style="display:flex;height:1.25rem;border-radius:3px;overflow:hidden;font-size:0.65rem;font-weight:600">
           ${used > 0 ? `<div style="width:${usedOfUsable * usableOfRaw / 100}%;background:var(--green);display:flex;align-items:center;justify-content:center;color:rgba(20,20,20,1)" title="Used: ${fmtBytes(used)}">Used</div>` : ''}
-          <div style="width:${freeOfUsable * usableOfRaw / 100}%;background:rgba(130,229,80,0.15);display:flex;align-items:center;justify-content:center;color:var(--green)" title="Free: ${fmtBytes(free)}">Free ${fmtBytes(free)}</div>
+          <div style="width:${Math.max(0, freeOfUsable - (usable > 0 ? snapReserved/usable*100 : 0)) * usableOfRaw / 100}%;background:rgba(130,229,80,0.15);display:flex;align-items:center;justify-content:center;color:var(--green)" title="Free: ${fmtBytes(Math.max(0,free - snapReserved))}">Free</div>
+          ${snapReserved > 0 && usable > 0 ? `<div style="width:${(snapReserved / usable * 100) * usableOfRaw / 100}%;background:rgba(154,111,255,0.25);display:flex;align-items:center;justify-content:center;color:rgba(154,111,255,1)" title="Snapshots: ${fmtBytes(snapUsed)} used / ${fmtBytes(snapReserved)} reserved">Snap</div>` : ''}
           <div style="width:${parityOfRaw}%;background:rgba(108,140,227,0.2);display:flex;align-items:center;justify-content:center;color:var(--secondary)" title="Parity: ${fmtBytes(raidParity)}">Parity</div>
           ${overheadOfRaw > 0.5 ? `<div style="width:${overheadOfRaw}%;background:rgba(237,153,9,0.15);display:flex;align-items:center;justify-content:center;color:var(--yellow)" title="Overhead: ${fmtBytes(overhead)}">OH</div>` : ''}
           ${unallocOfRaw > 0.5 ? `<div style="width:${unallocOfRaw}%;background:rgba(134,134,134,0.08);display:flex;align-items:center;justify-content:center;color:var(--muted)" title="Unallocated: ${fmtBytes(unallocated)}">Exp</div>` : ''}
@@ -527,7 +621,16 @@ function renderPool(summary, status) {
         <span style="flex:1"></span>
         <button onclick="createSnapshot('${pool.ID}')" style="font-size:11px;padding:4px 10px;margin-left:8px">+ Snapshot</button>
       </h3>
-      <div id="snapshots-${pool.ID}" style="font-size:13px;color:var(--muted)">Loading...</div>
+      ${(()=>{
+        if (!snaps || snaps.length === 0) return '<div style="color:var(--muted);font-size:13px;padding:4px 0">No snapshots</div>';
+        let sh = '<table><tr><th>Name</th><th>Used</th><th>Reserved</th><th>Created</th><th></th></tr>';
+        for (const s of snaps) {
+          const created = new Date(s.created_at * 1000).toLocaleString();
+          const pctStr = s.used_percent !== undefined ? ' ('+s.used_percent.toFixed(1)+'%)' : '';
+          sh += '<tr><td>'+s.name+'</td><td>'+fmtBytes(s.size_bytes||0)+pctStr+'</td><td style="color:var(--muted)">'+(s.allocated_bytes?fmtBytes(s.allocated_bytes):'—')+'</td><td>'+created+'</td><td><button class="danger" onclick="deleteSnapshot(\''+pool.ID+'\',\''+s.name+'\')" style="font-size:11px;padding:2px 8px">Delete</button></td></tr>';
+        }
+        return sh + '</table>';
+      })()}
     </div>
   </div>`;
 }
@@ -939,7 +1042,302 @@ async function refreshSafety() {
   } catch(e) {}
 }
 
+// --- Disks Page ---
+async function refreshDisksPage() {
+  try {
+    const disks = await api('/disks');
+    const el = document.getElementById('disksPage');
+    if (!disks || disks.length === 0) {
+      el.innerHTML = '<div class="empty">No disks detected.</div>';
+      return;
+    }
+    let html = '<div class="card"><h2>💾 All Disks</h2><table><tr><th>Device</th><th>Size</th><th>Status</th><th>Pool</th></tr>';
+    for (const d of disks) {
+      const status = d.inUse ? `<span class="badge healthy">in use</span>` : `<span class="badge" style="background:rgba(130,229,80,0.08);color:var(--green);border-color:rgba(130,229,80,0.2)">available</span>`;
+      html += `<tr><td>${d.device}</td><td>${d.sizeGB.toFixed(1)} GB</td><td>${status}</td><td>${d.pool || '—'}</td></tr>`;
+    }
+    html += '</table></div>';
+
+    // Per-pool disk detail
+    const pools = await api('/pools');
+    for (const p of pools) {
+      const st = await api('/pools/' + p.ID);
+      const ds = st.DiskStatuses || [];
+      if (ds.length === 0) continue;
+      html += `<div class="card"><h2>${p.Name} — Disk Detail</h2><table><tr><th>Device</th><th>Size</th><th>State</th><th>Arrays</th></tr>`;
+      for (const d of ds) {
+        html += `<tr><td>${d.Device}</td><td>${fmtBytes(d.CapacityBytes)}</td><td>${badge(d.State)}</td><td style="font-size:0.75rem;color:var(--muted)">${(d.ContributingArrays||[]).join(', ')}</td></tr>`;
+      }
+      html += '</table></div>';
+    }
+    el.innerHTML = html;
+  } catch(e) { toast(e.message, true); }
+}
+
+// --- Files Page ---
+let filesPoolID = '';
+let filesPath = '/';
+
+async function refreshFilesPage() {
+  const pools = await api('/pools');
+  const el = document.getElementById('filesPage');
+  if (!pools || pools.length === 0) { el.innerHTML = '<div class="empty">No pools.</div>'; return; }
+  if (!filesPoolID) filesPoolID = pools[0].ID;
+  let tabs = pools.map(p =>
+    `<button class="${p.ID===filesPoolID?'primary':''}" onclick="filesPoolID='${p.ID}';filesPath='/';browseFiles()" style="font-size:0.8rem">${p.Name}</button>`
+  ).join('');
+  el.innerHTML = `<div style="display:flex;gap:0.5rem;margin-bottom:1rem;flex-wrap:wrap">${tabs}</div><div id="fileBrowser"></div>`;
+  browseFiles();
+}
+
+async function browseFiles() {
+  try {
+    const r = await api('/pools/' + filesPoolID + '/files?path=' + encodeURIComponent(filesPath));
+    const entries = r.entries || [];
+    const curPath = r.path || '/';
+    filesPath = curPath;
+    const el = document.getElementById('fileBrowser');
+
+    const crumbs = curPath.split('/').filter(Boolean);
+    let bc = `<span onclick="filesPath='/';browseFiles()" style="cursor:pointer;color:var(--secondary)">/</span>`;
+    let acc = '';
+    for (const part of crumbs) {
+      acc += '/' + part;
+      const p = acc;
+      bc += ` <span style="color:var(--muted)">/</span> <span onclick="filesPath='${p}';browseFiles()" style="cursor:pointer;color:var(--secondary)">${part}</span>`;
+    }
+
+    let rows = '';
+    if (curPath !== '/') {
+      const parent = curPath.substring(0, curPath.lastIndexOf('/')) || '/';
+      rows += `<tr onclick="filesPath='${parent}';browseFiles()" style="cursor:pointer"><td>📁</td><td style="color:var(--secondary)">..</td><td></td><td></td><td></td></tr>`;
+    }
+    const dirs = entries.filter(e => e.is_dir).sort((a,b) => a.name.localeCompare(b.name));
+    const files = entries.filter(e => !e.is_dir).sort((a,b) => a.name.localeCompare(b.name));
+    for (const d of dirs) {
+      const cp = curPath === '/' ? '/' + d.name : curPath + '/' + d.name;
+      const mod = new Date(d.mod_time * 1000).toLocaleString();
+      rows += `<tr>
+        <td onclick="filesPath='${cp}';browseFiles()" style="cursor:pointer">📁</td>
+        <td onclick="filesPath='${cp}';browseFiles()" style="cursor:pointer;color:var(--secondary)">${d.name}</td>
+        <td></td><td style="color:var(--muted);font-size:12px">${mod}</td>
+        <td><button class="danger" onclick="event.stopPropagation();deleteFile('${d.name}')" style="font-size:10px;padding:1px 6px">✕</button></td></tr>`;
+    }
+    for (const f of files) {
+      const mod = new Date(f.mod_time * 1000).toLocaleString();
+      rows += `<tr><td>📄</td><td>${f.name}</td><td style="font-size:12px">${fmtBytes(f.size)}</td><td style="color:var(--muted);font-size:12px">${mod}</td>
+        <td><button class="danger" onclick="deleteFile('${f.name}')" style="font-size:10px;padding:1px 6px">✕</button></td></tr>`;
+    }
+    if (entries.length === 0) {
+      rows = '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:1rem">Empty directory</td></tr>';
+    }
+
+    el.innerHTML = `<div class="card">
+      <h2>📂 File Manager</h2>
+      <div style="font-size:13px;margin-bottom:0.75rem;font-family:monospace">${bc}</div>
+      <div style="display:flex;gap:0.35rem;margin-bottom:0.75rem;flex-wrap:wrap">
+        <button onclick="createFolder()" style="font-size:12px;padding:3px 10px">+ Folder</button>
+        <button onclick="createFile()" style="font-size:12px;padding:3px 10px">+ File</button>
+      </div>
+      <table><tr><th style="width:30px"></th><th>Name</th><th style="width:80px">Size</th><th style="width:160px">Modified</th><th style="width:30px"></th></tr>${rows}</table>
+    </div>`;
+  } catch(e) { toast(e.message, true); }
+}
+
+async function createFolder() {
+  const name = prompt('Folder name:');
+  if (!name) return;
+  try {
+    await api('/pools/' + filesPoolID + '/files?path=' + encodeURIComponent(filesPath), {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({action:'mkdir', name: name.trim()})
+    });
+    toast('Folder created');
+    browseFiles();
+  } catch(e) { toast(e.message, true); }
+}
+
+async function createFile() {
+  const name = prompt('File name:');
+  if (!name) return;
+  try {
+    await api('/pools/' + filesPoolID + '/files?path=' + encodeURIComponent(filesPath), {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({action:'mkfile', name: name.trim()})
+    });
+    toast('File created');
+    browseFiles();
+  } catch(e) { toast(e.message, true); }
+}
+
+async function deleteFile(name) {
+  if (!confirm('Delete "' + name + '"? This cannot be undone.')) return;
+  try {
+    await api('/pools/' + filesPoolID + '/files?path=' + encodeURIComponent(filesPath) + '&name=' + encodeURIComponent(name), { method: 'DELETE' });
+    toast('Deleted');
+    browseFiles();
+  } catch(e) { toast(e.message, true); }
+}
+
+// --- Snapshots Page ---
+async function refreshSnapshotsPage() {
+  try {
+    const pools = await api('/pools');
+    const el = document.getElementById('snapshotsPage');
+    if (!pools || pools.length === 0) {
+      el.innerHTML = '<div class="empty">No pools. Create a pool first.</div>';
+      return;
+    }
+    let html = '';
+    for (const p of pools) {
+      const snaps = await api('/pools/' + p.ID + '/snapshots');
+      html += `<div class="card"><h2>📸 ${p.Name} <span style="flex:1"></span><button onclick="createSnapshot('${p.ID}')">+ Snapshot</button></h2>`;
+      if (!snaps || snaps.length === 0) {
+        html += '<div style="color:var(--muted);font-size:13px;padding:8px 0">No snapshots</div>';
+      } else {
+        for (const s of snaps) {
+          const created = new Date(s.created_at * 1000).toLocaleString();
+          const usedStr = fmtBytes(s.size_bytes||0);
+          const allocStr = s.allocated_bytes ? fmtBytes(s.allocated_bytes) : '—';
+          const pctStr = s.used_percent !== undefined ? `${s.used_percent.toFixed(1)}%` : '';
+          const mountLabel = s.mount_path ? `<span style="color:var(--green)">${s.mount_path}</span>` : '<span style="color:var(--muted)">not mounted</span>';
+          html += `<div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:0.75rem;margin-bottom:0.5rem">
+            <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;margin-bottom:0.4rem">
+              <span style="font-weight:600;color:var(--text-bright);font-size:0.9rem">${s.name}</span>
+              <span style="font-size:0.75rem;color:var(--muted)">${created}</span>
+            </div>
+            <div style="display:flex;gap:1rem;font-size:0.8rem;margin-bottom:0.5rem;flex-wrap:wrap">
+              <span><span style="color:var(--muted)">Used:</span> ${usedStr} ${pctStr ? '('+pctStr+')' : ''}</span>
+              <span><span style="color:var(--muted)">Reserved:</span> ${allocStr}</span>
+              <span>${mountLabel}</span>
+            </div>
+            <div style="display:flex;gap:0.35rem;flex-wrap:wrap">
+              ${s.mount_path
+                ? `<button onclick="unmountSnapshot('${p.ID}','${s.name}')" style="font-size:11px;padding:2px 8px">⏏ Unmount</button>
+                   <button onclick="browseSnapshot('${p.ID}','${s.name}','/')" style="font-size:11px;padding:2px 8px;border-color:var(--cyan);color:var(--cyan)">🔍 Browse</button>`
+                : `<button onclick="mountSnapshot('${p.ID}','${s.name}')" style="font-size:11px;padding:2px 8px">📂 Mount</button>`}
+              <button onclick="renameSnapshot('${p.ID}','${s.name}')" style="font-size:11px;padding:2px 8px">✏ Rename</button>
+              <button onclick="restoreSnapshot('${p.ID}','${s.name}')" style="font-size:11px;padding:2px 8px;border-color:var(--yellow);color:var(--yellow)">↩ Restore</button>
+              <button class="danger" onclick="deleteSnapshot('${p.ID}','${s.name}')" style="font-size:11px;padding:2px 8px">Delete</button>
+            </div>
+          </div>`;
+        }
+      }
+      html += '</div>';
+    }
+    html += '<div id="snapshotBrowser"></div>';
+    el.innerHTML = html;
+  } catch(e) { toast(e.message, true); }
+}
+
+async function browseSnapshot(poolID, snapName, path) {
+  try {
+    const r = await api('/pools/' + poolID + '/snapshots/' + snapName + '/browse?path=' + encodeURIComponent(path));
+    const entries = r.entries || [];
+    const curPath = r.path || '/';
+    const el = document.getElementById('snapshotBrowser');
+
+    const breadcrumbs = curPath.split('/').filter(Boolean);
+    let bcHTML = `<span onclick="browseSnapshot('${poolID}','${snapName}','/')" style="cursor:pointer;color:var(--secondary)">/</span>`;
+    let accumulated = '';
+    for (const part of breadcrumbs) {
+      accumulated += '/' + part;
+      const p = accumulated;
+      bcHTML += ` <span style="color:var(--muted)">/</span> <span onclick="browseSnapshot('${poolID}','${snapName}','${p}')" style="cursor:pointer;color:var(--secondary)">${part}</span>`;
+    }
+
+    let rows = '';
+    if (curPath !== '/') {
+      const parent = curPath.substring(0, curPath.lastIndexOf('/')) || '/';
+      rows += `<tr onclick="browseSnapshot('${poolID}','${snapName}','${parent}')" style="cursor:pointer">
+        <td>📁</td><td style="color:var(--secondary)">..</td><td></td><td></td></tr>`;
+    }
+
+    const dirs = entries.filter(e => e.is_dir).sort((a,b) => a.name.localeCompare(b.name));
+    const files = entries.filter(e => !e.is_dir).sort((a,b) => a.name.localeCompare(b.name));
+
+    for (const d of dirs) {
+      const childPath = curPath === '/' ? '/' + d.name : curPath + '/' + d.name;
+      const mod = new Date(d.mod_time * 1000).toLocaleString();
+      rows += `<tr>
+        <td onclick="browseSnapshot('${poolID}','${snapName}','${childPath}')" style="cursor:pointer">📁</td>
+        <td onclick="browseSnapshot('${poolID}','${snapName}','${childPath}')" style="cursor:pointer;color:var(--secondary)">${d.name}</td>
+        <td></td><td style="color:var(--muted);font-size:12px">${mod}</td>
+        <td><button onclick="restoreFileFromSnap('${poolID}','${snapName}','${childPath}')" style="font-size:10px;padding:1px 6px;border-color:var(--yellow);color:var(--yellow)">↩</button></td></tr>`;
+    }
+    for (const f of files) {
+      const filePath = curPath === '/' ? '/' + f.name : curPath + '/' + f.name;
+      const mod = new Date(f.mod_time * 1000).toLocaleString();
+      rows += `<tr><td>📄</td><td>${f.name}</td><td style="font-size:12px">${fmtBytes(f.size)}</td><td style="color:var(--muted);font-size:12px">${mod}</td>
+        <td><button onclick="restoreFileFromSnap('${poolID}','${snapName}','${filePath}')" style="font-size:10px;padding:1px 6px;border-color:var(--yellow);color:var(--yellow)">↩</button></td></tr>`;
+    }
+    if (entries.length === 0) {
+      rows = '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:1rem">Empty directory</td></tr>';
+    }
+
+    el.innerHTML = `<div class="card" style="margin-top:1rem">
+      <h2>🔍 ${snapName} <span style="flex:1"></span>
+        <button onclick="document.getElementById('snapshotBrowser').innerHTML=''" style="font-size:11px;padding:2px 8px">✕ Close</button>
+      </h2>
+      <div style="font-size:13px;margin-bottom:0.75rem;font-family:monospace">${bcHTML}</div>
+      <table><tr><th style="width:30px"></th><th>Name</th><th style="width:80px">Size</th><th style="width:160px">Modified</th><th style="width:30px"></th></tr>${rows}</table>
+    </div>`;
+    el.scrollIntoView({behavior: 'smooth'});
+  } catch(e) { toast(e.message, true); }
+}
+
+async function restoreFileFromSnap(poolID, snapName, filePath) {
+  if (!confirm('Restore "' + filePath + '" from snapshot to the live pool?\n\nThis will overwrite the current version if it exists.')) return;
+  try {
+    await api('/pools/' + poolID + '/snapshots/' + snapName + '/restore-file', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({path: filePath})
+    });
+    toast('Restored ' + filePath);
+  } catch(e) { toast(e.message, true); }
+}
+
+// --- Settings Page ---
+async function refreshSettings() {
+  try {
+    const pools = await api('/pools');
+    const listEl = document.getElementById('settingsPoolList');
+    if (!pools || pools.length === 0) {
+      listEl.innerHTML = '<div style="color:var(--muted);font-size:13px;padding:8px 0">No pools</div>';
+    } else {
+      let html = '';
+      for (const p of pools) {
+        const st = await api('/pools/' + p.ID);
+        const pool = st.Pool;
+        const autoStart = pool.auto_start || pool.AutoStart || false;
+        html += `<div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:1rem;margin-bottom:0.75rem">
+          <div style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap">
+            <span style="font-weight:600;color:var(--text-bright)">${pool.Name}</span>
+            ${badge(pool.State)}
+            <span style="flex:1"></span>
+            <label style="display:flex;align-items:center;gap:6px;font-size:0.85rem;cursor:pointer;color:var(--text)">
+              <input type="checkbox" ${autoStart ? 'checked' : ''} onchange="setAutoStart('${pool.Name}', this.checked)"> Auto-start on boot
+            </label>
+          </div>
+          <div style="font-size:0.8rem;color:var(--muted);margin-top:0.4rem">
+            Mount: ${pool.MountPoint} &nbsp;|&nbsp; Parity: ${fmtParity(pool.ParityMode)} &nbsp;|&nbsp; ID: ${pool.ID}
+          </div>
+        </div>`;
+      }
+      listEl.innerHTML = html;
+    }
+    document.getElementById('settingsSystemInfo').innerHTML = `
+      <div style="display:grid;grid-template-columns:auto 1fr;gap:0.25rem 1rem">
+        <span style="color:var(--muted)">Pools</span><span>${pools ? pools.length : 0}</span>
+        <span style="color:var(--muted)">Config</span><span>/etc/poolforge.conf</span>
+        <span style="color:var(--muted)">Metadata</span><span>/var/lib/poolforge/</span>
+        <span style="color:var(--muted)">Mount root</span><span>/mnt/poolforge/</span>
+      </div>`;
+  } catch(e) { toast(e.message, true); }
+}
+
 // Initial load
+api('/version').then(r => { document.getElementById('versionBadge').textContent = 'v' + r.version; }).catch(()=>{});
 refresh();
 refreshAlerts();
 refreshLogs();
@@ -973,18 +1371,7 @@ async function autoWatchRebuilds() {
 }
 setInterval(autoWatchRebuilds, 3000);
 
-// --- Tab Switching ---
-function switchTab(tab) {
-  document.getElementById('tabPools').style.display = tab === 'pools' ? '' : 'none';
-  document.getElementById('tabMonitor').style.display = tab === 'monitor' ? '' : 'none';
-  document.getElementById('tabSync').style.display = tab === 'sync' ? '' : 'none';
-  document.getElementById('tabPoolsBtn').className = tab === 'pools' ? 'primary' : '';
-  document.getElementById('tabMonitorBtn').className = tab === 'monitor' ? 'primary' : '';
-  document.getElementById('tabSyncBtn').className = tab === 'sync' ? 'primary' : '';
-  if (tab === 'monitor') startMonitoringSSE();
-  else stopMonitoringSSE();
-  if (tab === 'sync') refreshSync();
-}
+// Tab switching replaced by navigate()
 
 // --- Shares Panel ---
 async function refreshShares() {
@@ -1227,34 +1614,17 @@ setInterval(refreshShares, 15000);
 setInterval(refreshUsers, 15000);
 setInterval(() => { if (monitorSSE) { refreshClients(); refreshProtocolStatus(); } }, 5000);
 
-// --- Snapshots Panel ---
-async function refreshSnapshots() {
-  try {
-    const pools = await api('/pools');
-    for (const p of pools) {
-      const el = document.getElementById('snapshots-' + p.ID);
-      if (!el) continue;
-      const snaps = await api('/pools/' + p.ID + '/snapshots');
-      if (!snaps || snaps.length === 0) {
-        el.innerHTML = '<div style="color:var(--muted);font-size:13px;padding:4px 0">No snapshots</div>';
-        continue;
-      }
-      let html = '<table><tr><th>Name</th><th>Size</th><th>Created</th><th></th></tr>';
-      for (const s of snaps) {
-        const created = new Date(s.created_at * 1000).toLocaleString();
-        html += `<tr><td>${s.name}</td><td>${fmtBytes(s.size_bytes||0)}</td><td>${created}</td>
-          <td><button class="danger" onclick="deleteSnapshot('${p.ID}','${s.name}')" style="font-size:11px;padding:2px 8px">Delete</button></td></tr>`;
-      }
-      el.innerHTML = html + '</table>';
-    }
-  } catch(e) {}
-}
+// Snapshots now rendered inline in renderPool — no separate refresh needed
 
 async function createSnapshot(poolID) {
+  const name = prompt('Snapshot name (leave empty for auto-generated):','');
+  if (name === null) return;
   try {
-    const snap = await api('/pools/' + poolID + '/snapshots', { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' });
+    const body = name.trim() ? {name: name.trim()} : {};
+    const snap = await api('/pools/' + poolID + '/snapshots', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
     toast('Snapshot ' + (snap.name || '') + ' created');
-    refreshSnapshots();
+    refresh();
+    if (currentPage === 'snapshots') refreshSnapshotsPage();
   } catch(e) { toast(e.message, true); }
 }
 
@@ -1263,12 +1633,51 @@ async function deleteSnapshot(poolID, name) {
   try {
     await api('/pools/' + poolID + '/snapshots/' + name, { method: 'DELETE' });
     toast('Snapshot deleted');
-    refreshSnapshots();
+    refresh();
+    if (currentPage === 'snapshots') refreshSnapshotsPage();
   } catch(e) { toast(e.message, true); }
 }
 
-setInterval(refreshSnapshots, 15000);
-setTimeout(refreshSnapshots, 2000);
+async function mountSnapshot(poolID, name) {
+  try {
+    const r = await api('/pools/' + poolID + '/snapshots/' + name + '/mount', { method: 'POST' });
+    toast('Snapshot mounted at ' + r.mount_path);
+    if (currentPage === 'snapshots') refreshSnapshotsPage();
+    else refresh();
+  } catch(e) { toast(e.message, true); }
+}
+
+async function unmountSnapshot(poolID, name) {
+  try {
+    await api('/pools/' + poolID + '/snapshots/' + name + '/unmount', { method: 'POST' });
+    toast('Snapshot unmounted');
+    if (currentPage === 'snapshots') refreshSnapshotsPage();
+    else refresh();
+  } catch(e) { toast(e.message, true); }
+}
+
+async function restoreSnapshot(poolID, name) {
+  if (!confirm('Restore snapshot "' + name + '"?\n\nThis will revert the pool to the state when this snapshot was taken. The pool will be briefly unmounted during the merge. The snapshot will be consumed.')) return;
+  try {
+    await api('/pools/' + poolID + '/snapshots/' + name + '/restore', { method: 'POST' });
+    toast('Pool restored to snapshot "' + name + '"');
+    refresh();
+    if (currentPage === 'snapshots') refreshSnapshotsPage();
+  } catch(e) { toast(e.message, true); }
+}
+
+async function renameSnapshot(poolID, oldName) {
+  const newName = prompt('New name for "' + oldName + '":', oldName);
+  if (!newName || newName === oldName) return;
+  try {
+    await api('/pools/' + poolID + '/snapshots/' + oldName + '/rename', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({new_name: newName}) });
+    toast('Snapshot renamed to "' + newName + '"');
+    refresh();
+    if (currentPage === 'snapshots') refreshSnapshotsPage();
+  } catch(e) { toast(e.message, true); }
+}
+
+// Snapshot refresh handled inline by refresh()
 
 // --- Sync Tab ---
 async function refreshSync() {

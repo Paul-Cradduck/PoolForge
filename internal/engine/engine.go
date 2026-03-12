@@ -39,6 +39,10 @@ type EngineService interface {
 	DeleteSnapshot(ctx context.Context, poolID string, name string) error
 	ListSnapshots(ctx context.Context, poolID string) ([]Snapshot, error)
 	SetSnapshotSchedule(ctx context.Context, poolID string, schedule SnapshotSchedule) error
+	MountSnapshot(ctx context.Context, poolID string, name string) (string, error)
+	UnmountSnapshot(ctx context.Context, poolID string, name string) error
+	RestoreSnapshot(ctx context.Context, poolID string, name string) error
+	RenameSnapshot(ctx context.Context, poolID string, oldName, newName string) error
 
 	// Pool Start/Stop
 	StartPool(ctx context.Context, poolName string, force bool) (*StartPoolResult, error)

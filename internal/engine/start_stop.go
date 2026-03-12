@@ -166,6 +166,14 @@ func (e *engineImpl) StopPool(ctx context.Context, poolName string) error {
 	// Sync pending writes
 	syscall.Sync()
 
+	// Unmount any mounted snapshots first (they live under the pool mount)
+	for i, snap := range pool.Snapshots {
+		if snap.MountPath != "" {
+			e.fs.UnmountFilesystem(snap.MountPath)
+			pool.Snapshots[i].MountPath = ""
+		}
+	}
+
 	// Unmount filesystem
 	if err := e.fs.UnmountFilesystem(pool.MountPoint); err != nil {
 		return fmt.Errorf("unmount failed: %w", err)

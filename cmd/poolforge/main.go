@@ -19,6 +19,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var Version = "0.10"
+
 func main() {
 	meta := metadata.NewJSONStore("")
 	eng := engine.NewEngine(
@@ -29,7 +31,7 @@ func main() {
 		meta,
 	)
 
-	root := &cobra.Command{Use: "poolforge", Short: "Hybrid RAID storage manager"}
+	root := &cobra.Command{Use: "poolforge", Short: "Hybrid RAID storage manager", Version: Version}
 
 	pool := &cobra.Command{Use: "pool", Short: "Pool management commands"}
 	root.AddCommand(pool)
@@ -677,6 +679,7 @@ func main() {
 			srv.SetShares(shareMgr)
 			srv.SetPairing(pairingMgr)
 			srv.SetSync(syncMgr)
+			srv.SetVersion(Version)
 			fmt.Printf("PoolForge web portal: http://%s\n", serveAddr)
 			fmt.Println("Safety daemon: SMART monitoring, scrub scheduling, metadata backup")
 			fmt.Println("Monitoring: disk IO, network IO, client connections")

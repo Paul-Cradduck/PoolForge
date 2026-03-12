@@ -237,16 +237,19 @@ func (e *engineImpl) GetPoolStatus(ctx context.Context, poolID string) (*PoolSta
 	for _, a := range pool.RAIDArrays {
 		cap := a.CapacityBytes
 		arrayState := a.State
+		// Probe the live array — if it responds, use live state; otherwise offline
 		if detail, err := e.raid.GetArrayDetail(a.Device); err == nil {
 			if detail.CapacityBytes > 0 {
 				cap = detail.CapacityBytes
 			}
-		}
-		if sync, err := e.raid.GetSyncStatus(a.Device); err == nil && !sync.InSync {
-			if sync.Action == "reshape" {
-				arrayState = ArrayRebuilding
-				anyReshaping = true
+			if sync, err := e.raid.GetSyncStatus(a.Device); err == nil && !sync.InSync {
+				if sync.Action == "reshape" {
+					arrayState = ArrayRebuilding
+					anyReshaping = true
+				}
 			}
+		} else if pool.OperationalStatus != PoolRunning {
+			arrayState = "offline"
 		}
 		status.ArrayStatuses = append(status.ArrayStatuses, ArrayStatus{
 			Device: a.Device, RAIDLevel: a.RAIDLevel, TierIndex: a.TierIndex,
@@ -501,13 +504,15 @@ func (e *engineImpl) ListSnapshots(ctx context.Context, poolID string) ([]Snapsh
 	}
 	// Enrich with current size from LVM
 	lvSnaps, _ := snapshots.List(pool.VolumeGroup)
-	sizeMap := make(map[string]uint64)
+	infoMap := make(map[string]snapshots.SnapInfo)
 	for _, s := range lvSnaps {
-		sizeMap[s.Name] = s.SizeBytes
+		infoMap[s.Name] = s
 	}
 	for i := range pool.Snapshots {
-		if sz, ok := sizeMap[pool.Snapshots[i].Name]; ok {
-			pool.Snapshots[i].SizeBytes = sz
+		if info, ok := infoMap[pool.Snapshots[i].Name]; ok {
+			pool.Snapshots[i].SizeBytes = info.SizeBytes
+			pool.Snapshots[i].AllocatedBytes = info.AllocatedBytes
+			pool.Snapshots[i].UsedPercent = info.UsedPercent
 		}
 	}
 	return pool.Snapshots, nil
@@ -519,6 +524,106 @@ func (e *engineImpl) SetSnapshotSchedule(ctx context.Context, poolID string, sch
 		return err
 	}
 	// Store schedule in metadata (daemon reads it)
+	pool.UpdatedAt = time.Now()
+	return e.meta.SavePool(pool)
+}
+
+func (e *engineImpl) MountSnapshot(ctx context.Context, poolID string, name string) (string, error) {
+	pool, err := e.meta.LoadPool(poolID)
+	if err != nil {
+		return "", err
+	}
+	for i, s := range pool.Snapshots {
+		if s.Name == name {
+			mountPath := snapshots.SnapMountPath(pool.MountPoint, name)
+			if err := snapshots.Mount(pool.VolumeGroup, name, mountPath); err != nil {
+				return "", fmt.Errorf("mount snapshot: %w", err)
+			}
+			pool.Snapshots[i].MountPath = mountPath
+			pool.UpdatedAt = time.Now()
+			e.meta.SavePool(pool)
+			return mountPath, nil
+		}
+	}
+	return "", fmt.Errorf("snapshot %q not found", name)
+}
+
+func (e *engineImpl) UnmountSnapshot(ctx context.Context, poolID string, name string) error {
+	pool, err := e.meta.LoadPool(poolID)
+	if err != nil {
+		return err
+	}
+	for i, s := range pool.Snapshots {
+		if s.Name == name {
+			if s.MountPath != "" {
+				snapshots.Unmount(s.MountPath)
+			}
+			pool.Snapshots[i].MountPath = ""
+			pool.UpdatedAt = time.Now()
+			return e.meta.SavePool(pool)
+		}
+	}
+	return fmt.Errorf("snapshot %q not found", name)
+}
+
+func (e *engineImpl) RestoreSnapshot(ctx context.Context, poolID string, name string) error {
+	pool, err := e.meta.LoadPool(poolID)
+	if err != nil {
+		return err
+	}
+	idx := -1
+	for i, s := range pool.Snapshots {
+		if s.Name == name {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return fmt.Errorf("snapshot %q not found", name)
+	}
+	// Unmount the pool filesystem before merge
+	e.fs.UnmountFilesystem(pool.MountPoint)
+	// Merge snapshot into origin — LVM handles the rollback
+	if err := snapshots.Restore(pool.VolumeGroup, name, pool.Snapshots[idx].MountPath); err != nil {
+		// Re-mount pool even on failure
+		e.fs.MountFilesystem(fmt.Sprintf("/dev/%s/%s", pool.VolumeGroup, pool.LogicalVolume), pool.MountPoint)
+		return fmt.Errorf("restore snapshot: %w", err)
+	}
+	// Snapshot is consumed by merge — remove from metadata
+	pool.Snapshots = append(pool.Snapshots[:idx], pool.Snapshots[idx+1:]...)
+	pool.UpdatedAt = time.Now()
+	e.meta.SavePool(pool)
+	// Re-mount pool with restored data
+	e.fs.MountFilesystem(fmt.Sprintf("/dev/%s/%s", pool.VolumeGroup, pool.LogicalVolume), pool.MountPoint)
+	return nil
+}
+
+func (e *engineImpl) RenameSnapshot(ctx context.Context, poolID string, oldName, newName string) error {
+	pool, err := e.meta.LoadPool(poolID)
+	if err != nil {
+		return err
+	}
+	idx := -1
+	for i, s := range pool.Snapshots {
+		if s.Name == oldName {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return fmt.Errorf("snapshot %q not found", oldName)
+	}
+	mountPath := pool.Snapshots[idx].MountPath
+	if err := snapshots.Rename(pool.VolumeGroup, oldName, newName, mountPath); err != nil {
+		return fmt.Errorf("rename snapshot: %w", err)
+	}
+	pool.Snapshots[idx].Name = newName
+	// Re-mount at new path if it was mounted
+	if mountPath != "" {
+		newMount := snapshots.SnapMountPath(pool.MountPoint, newName)
+		snapshots.Mount(pool.VolumeGroup, newName, newMount)
+		pool.Snapshots[idx].MountPath = newMount
+	}
 	pool.UpdatedAt = time.Now()
 	return e.meta.SavePool(pool)
 }

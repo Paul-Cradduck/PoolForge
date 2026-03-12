@@ -31,9 +31,23 @@ func Mount(vgName, snapName, mountPath string) error {
 	return exec.Command("mount", "-o", "ro", fmt.Sprintf("/dev/%s/%s", vgName, snapName), mountPath).Run()
 }
 
+// Unmount unmounts a snapshot.
+func Unmount(mountPath string) error {
+	return exec.Command("umount", mountPath).Run()
+}
+
+// Restore merges a snapshot back into its origin LV.
+// The origin filesystem must be unmounted first.
+func Restore(vgName, snapName, mountPath string) error {
+	if mountPath != "" {
+		exec.Command("umount", mountPath).Run()
+	}
+	return exec.Command("lvconvert", "--merge", fmt.Sprintf("/dev/%s/%s", vgName, snapName)).Run()
+}
+
 // List returns snapshot info from lvs output.
 func List(vgName string) ([]SnapInfo, error) {
-	out, err := exec.Command("lvs", "--noheadings", "-o", "lv_name,lv_size,origin", "--units", "b", vgName).Output()
+	out, err := exec.Command("lvs", "--noheadings", "-o", "lv_name,lv_size,origin,snap_percent", "--units", "b", vgName).Output()
 	if err != nil {
 		return nil, err
 	}
@@ -44,18 +58,31 @@ func List(vgName string) ([]SnapInfo, error) {
 			continue
 		}
 		// Only snapshots (have an origin)
-		sizeStr := strings.TrimSuffix(fields[1], "B")
-		size, _ := strconv.ParseFloat(sizeStr, 64)
-		snaps = append(snaps, SnapInfo{Name: fields[0], SizeBytes: uint64(size), Origin: fields[2]})
+		allocStr := strings.TrimSuffix(fields[1], "B")
+		alloc, _ := strconv.ParseFloat(allocStr, 64)
+		usedPct := 0.0
+		if len(fields) >= 4 {
+			usedPct, _ = strconv.ParseFloat(fields[3], 64)
+		}
+		usedBytes := uint64(alloc * usedPct / 100)
+		snaps = append(snaps, SnapInfo{
+			Name:           fields[0],
+			SizeBytes:      usedBytes,
+			AllocatedBytes: uint64(alloc),
+			UsedPercent:    usedPct,
+			Origin:         fields[2],
+		})
 	}
 	return snaps, nil
 }
 
 // SnapInfo is raw LVM snapshot info.
 type SnapInfo struct {
-	Name      string
-	SizeBytes uint64
-	Origin    string
+	Name           string
+	SizeBytes      uint64
+	AllocatedBytes uint64
+	UsedPercent    float64
+	Origin         string
 }
 
 // SnapMountPath returns the mount path for a snapshot.
@@ -66,6 +93,14 @@ func SnapMountPath(poolMount, snapName string) string {
 // GenerateName creates a timestamp-based snapshot name.
 func GenerateName() string {
 	return "snap_" + time.Now().Format("20060102_150405")
+}
+
+// Rename renames a snapshot LV. Must be unmounted first.
+func Rename(vgName, oldName, newName, mountPath string) error {
+	if mountPath != "" {
+		exec.Command("umount", mountPath).Run()
+	}
+	return exec.Command("lvrename", vgName, oldName, newName).Run()
 }
 
 // SpaceUsed returns the percentage of snapshot reserve space consumed.
