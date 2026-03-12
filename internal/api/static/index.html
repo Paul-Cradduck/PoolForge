@@ -275,6 +275,16 @@ tbody tr:nth-child(even) td { background: rgba(134,134,134,0.045); }
           <div id="gaugeNFS" style="font-size:24px;font-weight:700;color:var(--yellow)">0 conn</div>
         </div>
       </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px">
+          <div style="font-size:12px;color:var(--muted);margin-bottom:6px">Disk I/O (5 min)</div>
+          <canvas id="chartDisk" height="120" style="width:100%"></canvas>
+        </div>
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px">
+          <div style="font-size:12px;color:var(--muted);margin-bottom:6px">Network I/O (5 min)</div>
+          <canvas id="chartNet" height="120" style="width:100%"></canvas>
+        </div>
+      </div>
       <h3 style="font-size:13px;margin-bottom:8px">Connected Clients</h3>
       <table id="clientsTable">
         <tr><th>User</th><th>IP</th><th>Share</th><th>Protocol</th><th>Duration</th></tr>
@@ -293,6 +303,17 @@ tbody tr:nth-child(even) td { background: rgba(134,134,134,0.045); }
     <div class="card">
       <h2>⚙️ Pool Settings</h2>
       <div id="settingsPoolList"></div>
+    </div>
+    <div class="card">
+      <h2>🔌 Protocols</h2>
+      <div id="settingsProtocols" style="display:flex;gap:2rem;padding:0.5rem 0">
+        <label style="display:flex;align-items:center;gap:6px;font-size:0.9rem;cursor:pointer;color:var(--text)">
+          <input type="checkbox" id="toggleSMB" onchange="toggleProtocol('smb', this.checked)"> SMB (Windows/Samba)
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:0.9rem;cursor:pointer;color:var(--text)">
+          <input type="checkbox" id="toggleNFS" onchange="toggleProtocol('nfs', this.checked)"> NFS (Linux/Unix)
+        </label>
+      </div>
     </div>
     <div class="card">
       <h2>ℹ️ System Info</h2>
@@ -1297,8 +1318,18 @@ async function restoreFileFromSnap(poolID, snapName, filePath) {
   } catch(e) { toast(e.message, true); }
 }
 
+// --- Protocol Toggles ---
+async function toggleProtocol(proto, enabled) {
+  try {
+    await api('/protocols/toggle', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({protocol:proto, enabled})});
+    toast(proto.toUpperCase() + (enabled ? ' enabled' : ' disabled'));
+    refreshProtocolStatus();
+  } catch(e) { toast(e.message, true); refreshProtocolStatus(); }
+}
+
 // --- Settings Page ---
 async function refreshSettings() {
+  refreshProtocolStatus();
   try {
     const pools = await api('/pools');
     const listEl = document.getElementById('settingsPoolList');
@@ -1542,6 +1573,64 @@ async function deleteUser(name) {
 
 // --- Monitoring SSE ---
 let monitorSSE = null;
+const CHART_MAX = 60; // 5 min at 5s intervals
+const chartData = {diskR:[], diskW:[], netRx:[], netTx:[]};
+let chartTick = 0;
+
+function drawChart(canvasId, series, colors, labels, unit) {
+  const c = document.getElementById(canvasId);
+  if (!c) return;
+  const ctx = c.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  c.width = c.offsetWidth * dpr;
+  c.height = c.offsetHeight * dpr;
+  ctx.scale(dpr, dpr);
+  const W = c.offsetWidth, H = c.offsetHeight;
+  ctx.clearRect(0, 0, W, H);
+
+  let maxVal = 1;
+  series.forEach(s => s.forEach(v => { if (v > maxVal) maxVal = v; }));
+  maxVal = Math.ceil(maxVal / 10) * 10 || 10;
+
+  // Grid
+  ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+  ctx.lineWidth = 1;
+  for (let i = 1; i <= 4; i++) {
+    const y = H - (i / 4) * (H - 14);
+    ctx.beginPath(); ctx.moveTo(30, y); ctx.lineTo(W, y); ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    ctx.font = '9px sans-serif';
+    ctx.fillText((maxVal * i / 4).toFixed(0) + ' ' + unit, 0, y + 3);
+  }
+
+  // Lines
+  const pts = series[0].length;
+  if (pts < 2) return;
+  const xStep = (W - 34) / (CHART_MAX - 1);
+  const offset = CHART_MAX - pts;
+  series.forEach((s, si) => {
+    ctx.strokeStyle = colors[si];
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    s.forEach((v, i) => {
+      const x = 34 + (offset + i) * xStep;
+      const y = H - 14 - (v / maxVal) * (H - 20);
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  });
+
+  // Legend
+  ctx.font = '9px sans-serif';
+  let lx = 34;
+  labels.forEach((l, i) => {
+    ctx.fillStyle = colors[i];
+    ctx.fillRect(lx, H - 8, 8, 8);
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.fillText(l, lx + 11, H);
+    lx += ctx.measureText(l).width + 20;
+  });
+}
 
 function startMonitoringSSE() {
   if (monitorSSE) return;
@@ -1549,10 +1638,26 @@ function startMonitoringSSE() {
   monitorSSE.onmessage = (e) => {
     const snap = JSON.parse(e.data);
     updateGauges(snap);
+    chartTick++;
+    if (chartTick % 5 === 0) pushChartData(snap);
   };
   monitorSSE.onerror = () => { stopMonitoringSSE(); };
   refreshClients();
   refreshProtocolStatus();
+}
+
+function pushChartData(snap) {
+  let r = 0, w = 0, rx = 0, tx = 0;
+  (snap.disk_io || []).forEach(d => { r += d.read_mbps; w += d.write_mbps; });
+  (snap.net_io || []).forEach(n => { if (!n.protocol) { rx += n.rx_mbps; tx += n.tx_mbps; } });
+  chartData.diskR.push(r); chartData.diskW.push(w);
+  chartData.netRx.push(rx); chartData.netTx.push(tx);
+  if (chartData.diskR.length > CHART_MAX) {
+    chartData.diskR.shift(); chartData.diskW.shift();
+    chartData.netRx.shift(); chartData.netTx.shift();
+  }
+  drawChart('chartDisk', [chartData.diskR, chartData.diskW], ['#4ade80','#60a5fa'], ['Read','Write'], 'MB/s');
+  drawChart('chartNet', [chartData.netRx, chartData.netTx], ['#4ade80','#60a5fa'], ['In','Out'], 'MB/s');
 }
 
 function stopMonitoringSSE() {
@@ -1603,7 +1708,9 @@ async function refreshProtocolStatus() {
   try {
     const s = await api('/monitoring/status');
     const el = document.getElementById('protocolStatus');
-    el.innerHTML = `SMB ${s.smb ? '<span style="color:var(--green)">✓</span>' : '<span style="color:var(--red)">✗</span>'} &nbsp; NFS ${s.nfs ? '<span style="color:var(--green)">✓</span>' : '<span style="color:var(--red)">✗</span>'}`;
+    if (el) el.innerHTML = `SMB ${s.smb ? '<span style="color:var(--green)">✓</span>' : '<span style="color:var(--red)">✗</span>'} &nbsp; NFS ${s.nfs ? '<span style="color:var(--green)">✓</span>' : '<span style="color:var(--red)">✗</span>'}`;
+    const smb = document.getElementById('toggleSMB'); if (smb) smb.checked = s.smb;
+    const nfs = document.getElementById('toggleNFS'); if (nfs) nfs.checked = s.nfs;
   } catch(e) {}
 }
 

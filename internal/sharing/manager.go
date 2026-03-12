@@ -83,6 +83,12 @@ func (m *ShareManager) SMBRunning() bool { return m.smb.IsRunning() }
 // NFSRunning returns true if nfs-server is active.
 func (m *ShareManager) NFSRunning() bool { return m.nfs.IsRunning() }
 
+// ToggleSMB starts or stops the SMB service.
+func (m *ShareManager) ToggleSMB(on bool) { m.smb.ManageService(on) }
+
+// ToggleNFS starts or stops the NFS service.
+func (m *ShareManager) ToggleNFS(on bool) { m.nfs.ManageService(on) }
+
 // GetShareSize returns the size in bytes of a share directory.
 func GetShareSize(path string) (uint64, error) {
 	out, err := exec.Command("du", "-sb", path).Output()

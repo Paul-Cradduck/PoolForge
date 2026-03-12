@@ -109,10 +109,10 @@ func (c *Collector) sample() {
 	smbBytes := getPortBytes(445)
 	nfsBytes := getPortBytes(2049)
 	if smbBytes[0]+smbBytes[1] > 0 {
-		netIO = append(netIO, engine.NetIOStats{Protocol: "smb", RxMBps: float64(smbBytes[0]) / 1048576, TxMBps: float64(smbBytes[1]) / 1048576})
+		netIO = append(netIO, engine.NetIOStats{Protocol: "smb", RxMBps: float64(smbBytes[0]), TxMBps: float64(smbBytes[1])})
 	}
 	if nfsBytes[0]+nfsBytes[1] > 0 {
-		netIO = append(netIO, engine.NetIOStats{Protocol: "nfs", RxMBps: float64(nfsBytes[0]) / 1048576, TxMBps: float64(nfsBytes[1]) / 1048576})
+		netIO = append(netIO, engine.NetIOStats{Protocol: "nfs", RxMBps: float64(nfsBytes[0]), TxMBps: float64(nfsBytes[1])})
 	}
 
 	snap := engine.MetricsSnapshot{Timestamp: now, DiskIO: diskIO, NetIO: netIO}
@@ -262,13 +262,31 @@ func pollClients() []engine.ClientConnection {
 	var clients []engine.ClientConnection
 
 	// SMB clients via smbstatus
+	pidUser := map[string]string{}
+	if out, err := exec.Command("smbstatus", "--processes", "--fast").Output(); err == nil {
+		for _, line := range strings.Split(string(out), "\n") {
+			fields := strings.Fields(line)
+			if len(fields) >= 2 && !strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "PID") && !strings.HasPrefix(line, "Samba") {
+				pidUser[fields[0]] = fields[1]
+			}
+		}
+	}
 	if out, err := exec.Command("smbstatus", "--shares", "--fast").Output(); err == nil {
 		for _, line := range strings.Split(string(out), "\n") {
 			fields := strings.Fields(line)
 			if len(fields) >= 4 && !strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "Service") {
+				if fields[0] == "IPC$" {
+					continue
+				}
+				connAt := time.Now().Unix()
+				if len(fields) >= 9 {
+					if t, err := time.Parse("Mon Jan 2 15:04:05 2006 MST", strings.Join(fields[3:9], " ")); err == nil {
+						connAt = t.Unix()
+					}
+				}
 				clients = append(clients, engine.ClientConnection{
-					Share: fields[0], User: fields[1], IP: fields[3],
-					Protocol: "smb", ConnectedAt: time.Now().Unix(),
+					Share: fields[0], User: pidUser[fields[1]], IP: fields[2],
+					Protocol: "smb", ConnectedAt: connAt,
 				})
 			}
 		}

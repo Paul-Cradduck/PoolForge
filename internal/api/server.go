@@ -86,6 +86,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/monitoring/history", s.handleMonitoringHistory)
 	s.mux.HandleFunc("/api/monitoring/clients", s.handleMonitoringClients)
 	s.mux.HandleFunc("/api/monitoring/status", s.handleProtocolStatus)
+	s.mux.HandleFunc("/api/protocols/toggle", s.handleProtocolToggle)
 	s.mux.HandleFunc("/api/pair/init", s.handlePairInit)
 	s.mux.HandleFunc("/api/pair/exchange", s.handlePairExchange)
 	s.mux.HandleFunc("/api/pair/nodes", s.handlePairNodes)
@@ -1019,6 +1020,35 @@ func (s *Server) handleProtocolStatus(w http.ResponseWriter, r *http.Request) {
 		status["nfs"] = s.shares.NFSRunning()
 	}
 	jsonResp(w, status)
+}
+
+func (s *Server) handleProtocolToggle(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		Protocol string `json:"protocol"`
+		Enabled  bool   `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpError(w, err, http.StatusBadRequest)
+		return
+	}
+	if s.shares == nil {
+		httpError(w, fmt.Errorf("sharing not initialized"), http.StatusInternalServerError)
+		return
+	}
+	switch req.Protocol {
+	case "smb":
+		s.shares.ToggleSMB(req.Enabled)
+	case "nfs":
+		s.shares.ToggleNFS(req.Enabled)
+	default:
+		httpError(w, fmt.Errorf("unknown protocol: %s", req.Protocol), http.StatusBadRequest)
+		return
+	}
+	jsonResp(w, map[string]bool{"ok": true})
 }
 
 // --- Phase 6: Snapshots ---

@@ -103,6 +103,7 @@ Type=simple
 ExecStart=/usr/local/bin/poolforge serve --addr 0.0.0.0:8080
 Restart=on-failure
 RestartSec=5
+TimeoutStopSec=5
 LimitNOFILE=65536
 
 [Install]
@@ -143,6 +144,7 @@ ExecStart=/bin/bash -c '/usr/local/bin/poolforge serve \
   ${POOLFORGE_WEBHOOK:+--webhook $POOLFORGE_WEBHOOK}'
 Restart=on-failure
 RestartSec=5
+TimeoutStopSec=5
 LimitNOFILE=65536
 
 [Install]
