@@ -2,7 +2,7 @@
 
 ## Overview
 
-PoolForge is a storage management system for Ubuntu LTS 24.04+ that replicates Synology Hybrid RAID (SHR) functionality using standard Linux storage tools (mdadm, LVM, ext4). The system accepts mixed-size disks, computes capacity tiers, partitions disks into slices, assembles mdadm RAID arrays per tier, stitches them into an LVM volume group, and presents a single ext4 logical volume. It supports single-parity (SHR-1) and double-parity (SHR-2) modes, self-healing rebuilds, hot-add disk expansion, and multi-pool isolation.
+PoolForge is a storage management system for Ubuntu LTS 24.04+ that replicates hybrid RAID functionality using standard Linux storage tools (mdadm, LVM, ext4). The system accepts mixed-size disks, computes capacity tiers, partitions disks into slices, assembles mdadm RAID arrays per tier, stitches them into an LVM volume group, and presents a single ext4 logical volume. It supports single-parity (parity1) and double-parity (parity2) modes, self-healing rebuilds, hot-add disk expansion, and multi-pool isolation.
 
 The system is delivered as a Go single binary (backend + CLI) with a React SPA frontend served by the same binary. An automated AWS-based test infrastructure (Terraform + Test_Runner) enables integration and end-to-end testing against real block devices (EBS volumes).
 
@@ -126,7 +126,7 @@ The central orchestrator for all pool operations.
 type Pool struct {
     ID            string
     Name          string
-    ParityMode    ParityMode       // SHR1 or SHR2
+    ParityMode    ParityMode       // Parity1 or Parity2
     State         PoolState        // Healthy, Degraded, Failed
     Disks         []DiskInfo
     CapacityTiers []CapacityTier
@@ -140,8 +140,8 @@ type Pool struct {
 
 type ParityMode int
 const (
-    SHR1 ParityMode = iota  // Single parity (RAID5/RAID1)
-    SHR2                     // Double parity (RAID6/RAID5/RAID1)
+    Parity1 ParityMode = iota  // Single parity (RAID5/RAID1)
+    Parity2                     // Double parity (RAID6/RAID5/RAID1)
 )
 
 type PoolState string
@@ -176,7 +176,7 @@ type EngineService interface {
 
 #### Capacity Tier Computation Algorithm
 
-The tier computation is the core algorithm that differentiates SHR from standard RAID:
+The tier computation is the core algorithm that differentiates PoolForge from standard RAID:
 
 ```
 Input: sorted unique disk capacities [C1, C2, ..., Cn] where C1 < C2 < ... < Cn
@@ -202,11 +202,11 @@ Algorithm:
 
 | Parity Mode | Eligible Disk Count | RAID Level |
 |-------------|-------------------|------------|
-| SHR-1       | ≥ 3               | RAID 5     |
-| SHR-1       | 2                 | RAID 1     |
-| SHR-2       | ≥ 4               | RAID 6     |
-| SHR-2       | 3                 | RAID 5     |
-| SHR-2       | 2                 | RAID 1     |
+| parity1       | ≥ 3               | RAID 5     |
+| parity1       | 2                 | RAID 1     |
+| parity2       | ≥ 4               | RAID 6     |
+| parity2       | 3                 | RAID 5     |
+| parity2       | 2                 | RAID 1     |
 
 ### 2. Storage Abstraction Layer (`internal/storage`)
 
@@ -371,7 +371,7 @@ Session middleware validates auth token on all `/api/*` endpoints except `/api/a
 ### 8. CLI (`cmd/poolforge`)
 
 ```
-poolforge pool create --disks /dev/sdb,/dev/sdc,/dev/sdd --parity shr1 --name mypool
+poolforge pool create --disks /dev/sdb,/dev/sdc,/dev/sdd --parity parity1 --name mypool
 poolforge pool status <pool-name>
 poolforge pool status <pool-name> --array <array-id>
 poolforge pool list
@@ -466,7 +466,7 @@ sequenceDiagram
     "<pool-id>": {
       "id": "<uuid>",
       "name": "<pool-name>",
-      "parity_mode": "shr1|shr2",
+      "parity_mode": "parity1|parity2",
       "state": "healthy|degraded|failed",
       "disks": [
         {
@@ -539,7 +539,7 @@ sequenceDiagram
 Logs are stored as newline-delimited JSON (NDJSON) at `/var/log/poolforge/events.log`:
 
 ```json
-{"timestamp":"2025-01-01T12:00:00Z","level":"info","source":"pool:mypool","message":"Pool created with 4 disks, SHR-1 parity"}
+{"timestamp":"2025-01-01T12:00:00Z","level":"info","source":"pool:mypool","message":"Pool created with 4 disks, parity1 parity"}
 {"timestamp":"2025-01-01T12:05:00Z","level":"warning","source":"disk:/dev/sdb","message":"SMART warning: reallocated sectors count 105 exceeds threshold 100"}
 {"timestamp":"2025-01-01T12:10:00Z","level":"error","source":"array:md0","message":"Disk /dev/sdb1 failed in RAID array md0"}
 ```
@@ -570,7 +570,7 @@ Logs are stored as newline-delimited JSON (NDJSON) at `/var/log/poolforge/events
   "id": "<uuid>",
   "name": "mypool",
   "state": "healthy",
-  "parity_mode": "shr1",
+  "parity_mode": "parity1",
   "total_capacity_bytes": 3000000000000,
   "used_capacity_bytes": 1200000000000,
   "mount_point": "/mnt/poolforge/mypool",
@@ -654,7 +654,7 @@ Response:
 
 ### Property 4: RAID level selection follows parity mode and disk count rules
 
-*For any* parity mode (SHR-1 or SHR-2) and any eligible disk count for a capacity tier, the selected RAID level should match the selection table: SHR-1 with ≥3 disks → RAID 5, SHR-1 with 2 disks → RAID 1, SHR-2 with ≥4 disks → RAID 6, SHR-2 with 3 disks → RAID 5, SHR-2 with 2 disks → RAID 1.
+*For any* parity mode (parity1 or parity2) and any eligible disk count for a capacity tier, the selected RAID level should match the selection table: parity1 with ≥3 disks → RAID 5, parity1 with 2 disks → RAID 1, parity2 with ≥4 disks → RAID 6, parity2 with 3 disks → RAID 5, parity2 with 2 disks → RAID 1.
 
 **Validates: Requirements 1.5, 1.6, 1.7, 1.8, 1.9**
 
@@ -886,8 +886,8 @@ Response:
 | mdadm command failure | Log error, roll back partial operations, report to caller | — |
 | LVM command failure | Log error, roll back partial operations, report to caller | — |
 | ext4 creation failure | Log error, clean up VG/LV/arrays, report to caller | — |
-| Disk failure during rebuild (SHR-1) | Mark affected arrays as failed, log critical alert | 4.5 |
-| Disk failure during rebuild (SHR-2) | Continue degraded, log warning alert | 4.6 |
+| Disk failure during rebuild (parity1) | Mark affected arrays as failed, log critical alert | 4.5 |
+| Disk failure during rebuild (parity2) | Continue degraded, log warning alert | 4.6 |
 | SMART query failure | Log info, mark SMART status "unavailable" | 9.9 |
 
 ### Rollback Strategy
@@ -928,7 +928,7 @@ PoolForge uses both unit tests and property-based tests as complementary strateg
 
 Unit tests focus on:
 - Specific examples demonstrating correct behavior (e.g., 3 disks of 1TB/2TB/4TB → expected tiers)
-- Edge cases: minimum disk count rejection (Req 1.12), duplicate disk rejection, SHR-2 with exactly 2 disks
+- Edge cases: minimum disk count rejection (Req 1.12), duplicate disk rejection, parity2 with exactly 2 disks
 - Error conditions: invalid disk descriptors, failed mdadm commands, authentication failures
 - Integration points: metadata store read/write, API endpoint request/response
 

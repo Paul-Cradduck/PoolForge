@@ -48,6 +48,13 @@ type poolRecord struct {
 	Snapshots      []engine.Snapshot     `json:"snapshots,omitempty"`
 	CreatedAt      time.Time             `json:"created_at"`
 	UpdatedAt      time.Time             `json:"updated_at"`
+
+	// External enclosure support
+	IsExternal          bool       `json:"is_external"`
+	RequiresManualStart bool       `json:"requires_manual_start"`
+	OperationalStatus   string     `json:"operational_status,omitempty"`
+	LastShutdown        *time.Time `json:"last_shutdown,omitempty"`
+	LastStartup         *time.Time `json:"last_startup,omitempty"`
 }
 
 type diskRecord struct {
@@ -79,6 +86,7 @@ type arrayRecord struct {
 	State         string   `json:"state"`
 	Members       []string `json:"members"`
 	CapacityBytes uint64   `json:"capacity_bytes"`
+	UUID          string   `json:"uuid,omitempty"`
 }
 
 func (s *JSONStore) SavePool(pool *engine.Pool) error {
@@ -185,6 +193,9 @@ func toRecord(p *engine.Pool) *poolRecord {
 		Shares: p.Shares, Users: p.Users,
 		SnapshotConfig: p.SnapshotConfig, Snapshots: p.Snapshots,
 		CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,
+		IsExternal: p.IsExternal, RequiresManualStart: p.RequiresManualStart,
+		OperationalStatus: string(p.OperationalStatus),
+		LastShutdown: p.LastShutdown, LastStartup: p.LastStartup,
 	}
 	for _, d := range p.Disks {
 		dr := diskRecord{Device: d.Device, CapacityBytes: d.CapacityBytes, State: string(d.State), FailedAt: d.FailedAt}
@@ -206,16 +217,24 @@ func toRecord(p *engine.Pool) *poolRecord {
 		rec.RAIDArrays = append(rec.RAIDArrays, arrayRecord{
 			Device: a.Device, RAIDLevel: a.RAIDLevel, TierIndex: a.TierIndex,
 			State: string(a.State), Members: a.Members, CapacityBytes: a.CapacityBytes,
+			UUID: a.UUID,
 		})
 	}
 	return rec
 }
 
 func fromRecord(rec *poolRecord) *engine.Pool {
-	pm := engine.SHR1
-	if rec.ParityMode == "shr2" {
-		pm = engine.SHR2
+	pm := engine.Parity1
+	if rec.ParityMode == "parity2" {
+		pm = engine.Parity2
 	}
+
+	// Phase 5: backward-compatible default
+	opStatus := engine.PoolOperationalStatus(rec.OperationalStatus)
+	if opStatus == "" {
+		opStatus = engine.PoolRunning
+	}
+
 	p := &engine.Pool{
 		ID: rec.ID, Name: rec.Name, ParityMode: pm,
 		State: engine.PoolState(rec.State), VolumeGroup: rec.VolumeGroup,
@@ -223,6 +242,9 @@ func fromRecord(rec *poolRecord) *engine.Pool {
 		Shares: rec.Shares, Users: rec.Users,
 		SnapshotConfig: rec.SnapshotConfig, Snapshots: rec.Snapshots,
 		CreatedAt: rec.CreatedAt, UpdatedAt: rec.UpdatedAt,
+		IsExternal: rec.IsExternal, RequiresManualStart: rec.RequiresManualStart,
+		OperationalStatus: opStatus,
+		LastShutdown: rec.LastShutdown, LastStartup: rec.LastStartup,
 	}
 	for _, dr := range rec.Disks {
 		d := engine.DiskInfo{Device: dr.Device, CapacityBytes: dr.CapacityBytes, State: engine.DiskState(dr.State), FailedAt: dr.FailedAt}
@@ -244,6 +266,7 @@ func fromRecord(rec *poolRecord) *engine.Pool {
 		p.RAIDArrays = append(p.RAIDArrays, engine.RAIDArray{
 			Device: ar.Device, RAIDLevel: ar.RAIDLevel, TierIndex: ar.TierIndex,
 			State: engine.ArrayState(ar.State), Members: ar.Members, CapacityBytes: ar.CapacityBytes,
+			UUID: ar.UUID,
 		})
 	}
 	return p

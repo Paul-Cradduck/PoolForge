@@ -2,7 +2,7 @@ package engine
 
 import "context"
 
-// EngineService defines the Phase 1 + Phase 2 operations interface.
+// EngineService defines the Phase 1 + Phase 2 + Phase 5 operations interface.
 type EngineService interface {
 	// Phase 1
 	CreatePool(ctx context.Context, req CreatePoolRequest) (*Pool, error)
@@ -39,6 +39,16 @@ type EngineService interface {
 	DeleteSnapshot(ctx context.Context, poolID string, name string) error
 	ListSnapshots(ctx context.Context, poolID string) ([]Snapshot, error)
 	SetSnapshotSchedule(ctx context.Context, poolID string, schedule SnapshotSchedule) error
+
+	// Pool Start/Stop
+	StartPool(ctx context.Context, poolName string, force bool) (*StartPoolResult, error)
+	StopPool(ctx context.Context, poolName string) error
+	SetAutoStart(ctx context.Context, poolName string, autoStart bool) error
+
+	// Recovery actions
+	AssembleArrays(ctx context.Context, poolName string) error
+	ActivateLVM(ctx context.Context, poolName string) error
+	MountPool(ctx context.Context, poolName string) error
 }
 
 // MetadataStore defines the persistence interface.

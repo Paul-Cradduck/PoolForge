@@ -3,7 +3,9 @@ package engine
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/poolforge/poolforge/internal/storage"
@@ -285,6 +287,19 @@ func (e *engineImpl) AddDisk(ctx context.Context, poolID string, disk string) er
 	newDiskSlices := ComputeDiskSlices(newInfo.CapacityBytes, newTiers)
 	var newDiskSliceInfos []SliceInfo
 	var offset uint64 = 1048576
+
+	// Temporarily disable mdadm udev auto-assembly during partitioning.
+	// Without this, partprobe triggers udev → mdadm --incremental which
+	// grabs new partitions into existing arrays before we can add them.
+	const assemblyRule = "/lib/udev/rules.d/64-md-raid-assembly.rules"
+	const assemblyRuleOff = "/lib/udev/rules.d/64-md-raid-assembly.rules.disabled"
+	os.Rename(assemblyRule, assemblyRuleOff)
+	exec.Command("udevadm", "control", "--reload-rules").Run()
+	defer func() {
+		os.Rename(assemblyRuleOff, assemblyRule)
+		exec.Command("udevadm", "control", "--reload-rules").Run()
+	}()
+
 	for _, sl := range newDiskSlices {
 		part, err := e.disk.CreatePartition(disk, offset, sl.SizeBytes)
 		if err != nil {
@@ -310,12 +325,29 @@ func (e *engineImpl) AddDisk(ctx context.Context, poolID string, disk string) er
 					return err
 				}
 				pool.RAIDArrays[i].Members = append(pool.RAIDArrays[i].Members, sl.PartitionDevice)
-				newCount := len(pool.RAIDArrays[i].Members)
+				// Get actual member count from mdadm (metadata Members may be stale)
+				detail, err := e.raid.GetArrayDetail(pool.RAIDArrays[i].Device)
+				if err != nil {
+					return fmt.Errorf("get detail for %s: %w", pool.RAIDArrays[i].Device, err)
+				}
+				activeCount := 0
+				for _, m := range detail.Members {
+					if !strings.Contains(m.State, "spare") {
+						activeCount++
+					}
+				}
+				newCount := activeCount + 1 // +1 for the spare we just added
 				newLevel, _ := SelectRAIDLevel(pool.ParityMode, newCount)
 				if err := e.raid.ReshapeArray(pool.RAIDArrays[i].Device, newCount, newLevel); err != nil {
 					return err
 				}
 				pool.RAIDArrays[i].RAIDLevel = newLevel
+				// Update members from detail so metadata is accurate
+				var allMembers []string
+				for _, m := range detail.Members {
+					allMembers = append(allMembers, m.Device)
+				}
+				pool.RAIDArrays[i].Members = allMembers
 				pool.CapacityTiers[pool.RAIDArrays[i].TierIndex].EligibleDiskCount = newCount
 			}
 		}

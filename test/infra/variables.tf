@@ -18,7 +18,8 @@ variable "run_id" {
 variable "volume_sizes" {
   description = "EBS volume sizes in GB (mixed sizes for SHR testing)"
   type        = list(number)
-  default     = [1, 2, 2, 3, 4, 10]
+  default     = [1, 2, 2, 3, 4, 10, 1, 2, 3, 4]
+  # First 6: Phase 1-4 tests. Last 4: Phase 5 external enclosure tests.
 }
 
 variable "vpc_id" {

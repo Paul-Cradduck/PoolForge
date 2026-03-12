@@ -8,25 +8,25 @@ import (
 type ParityMode int
 
 const (
-	SHR1 ParityMode = iota
-	SHR2
+	Parity1 ParityMode = iota
+	Parity2
 )
 
 func (p ParityMode) String() string {
-	if p == SHR2 {
-		return "shr2"
+	if p == Parity2 {
+		return "parity2"
 	}
-	return "shr1"
+	return "parity1"
 }
 
 func ParseParityMode(s string) (ParityMode, error) {
 	switch s {
-	case "shr1":
-		return SHR1, nil
-	case "shr2":
-		return SHR2, nil
+	case "parity1":
+		return Parity1, nil
+	case "parity2":
+		return Parity2, nil
 	default:
-		return 0, fmt.Errorf("unsupported parity mode %q, use shr1 or shr2", s)
+		return 0, fmt.Errorf("unsupported parity mode %q, use parity1 or parity2", s)
 	}
 }
 
@@ -55,6 +55,15 @@ const (
 	DiskFailed  DiskState = "failed"
 )
 
+// PoolOperationalStatus represents the runtime state of a pool.
+type PoolOperationalStatus string
+
+const (
+	PoolRunning        PoolOperationalStatus = "running"
+	PoolOffline        PoolOperationalStatus = "offline"
+	PoolSafeToShutdown PoolOperationalStatus = "safe_to_power_down"
+)
+
 type Pool struct {
 	ID             string
 	Name           string
@@ -72,6 +81,13 @@ type Pool struct {
 	Snapshots      []Snapshot
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
+
+	// External enclosure support
+	IsExternal          bool                  `json:"is_external"`
+	RequiresManualStart bool                  `json:"requires_manual_start"`
+	OperationalStatus   PoolOperationalStatus `json:"operational_status"`
+	LastShutdown        *time.Time            `json:"last_shutdown"`
+	LastStartup         *time.Time            `json:"last_startup"`
 }
 
 type Share struct {
@@ -205,13 +221,15 @@ type RAIDArray struct {
 	State         ArrayState
 	Members       []string
 	CapacityBytes uint64
+	UUID          string `json:"uuid"`
 }
 
 type CreatePoolRequest struct {
 	Name            string
 	Disks           []string
 	ParityMode      ParityMode
-	SnapshotReserve int // percent, 0 = default 10
+	SnapshotReserve int  // percent, 0 = default 10
+	External        bool // if true, sets IsExternal=true, RequiresManualStart=true
 }
 
 type PoolSummary struct {
@@ -279,4 +297,27 @@ type ArrayChange struct {
 	OldMembers   int
 	NewMembers   int
 	Destroyed    bool
+}
+
+// Phase 5: Pool Start/Stop result types
+
+type StartPoolResult struct {
+	PoolName     string
+	MountPoint   string
+	ArrayResults []ArrayStartResult
+	Warnings     []string
+}
+
+type ArrayStartResult struct {
+	Device       string
+	TierIndex    int
+	State        ArrayState
+	ReAddedParts []string
+	FullRebuilds []string
+}
+
+type SuperblockMatch struct {
+	PartitionDevice string
+	ArrayUUID       string
+	PreviousDevice  string
 }

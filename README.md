@@ -413,6 +413,10 @@ curl -sSL https://raw.githubusercontent.com/Paul-Cradduck/PoolForge/main/uninsta
 
 Removes the binary, service, and optionally config/metadata. Never touches your arrays, LVM volumes, or data.
 
+## Disclaimer
+
+PoolForge is provided as-is with no warranty of any kind. Use at your own risk. The authors are not responsible for data loss, corruption, or any damages resulting from the use of this software. Always maintain independent backups of critical data.
+
 ## License
 
 MIT

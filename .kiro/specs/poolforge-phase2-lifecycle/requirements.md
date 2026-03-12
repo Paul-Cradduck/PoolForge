@@ -2,7 +2,7 @@
 
 ## Introduction
 
-This document specifies the requirements for Phase 2 of the PoolForge project. PoolForge is an open-source storage management tool for Ubuntu LTS (24.04+) that replicates Synology Hybrid RAID (SHR) functionality using mdadm and LVM. The full project scope is defined in the master spec at `.kiro/specs/hybrid-raid-manager/`. Phase 1 is defined at `.kiro/specs/poolforge-phase1-core-engine/`.
+This document specifies the requirements for Phase 2 of the PoolForge project. PoolForge is an open-source storage management tool for Ubuntu LTS (24.04+) that replicates hybrid RAID functionality using mdadm and LVM. The full project scope is defined in the master spec at `.kiro/specs/hybrid-raid-manager/`. Phase 1 is defined at `.kiro/specs/poolforge-phase1-core-engine/`.
 
 Phase 1 established the foundation: capacity-tier computation from mixed-size disks, GPT disk partitioning, mdadm RAID array creation, LVM stitching (PV → VG → LV), ext4 filesystem creation, a CLI for pool creation/status/list, a JSON-based metadata store with atomic writes, and the automated cloud-based test infrastructure (Terraform IaC for EC2 + EBS, Test_Runner script). Phase 1 defined and implemented the core interfaces: EngineService (CreatePool, GetPool, ListPools, GetPoolStatus), StorageAbstraction (DiskManager, RAIDManager, LVMManager, FilesystemManager), and MetadataStore (SavePool, LoadPool, ListPools).
 
@@ -34,7 +34,7 @@ Phase 2 MUST NOT break any Phase 1 functionality. All existing CLI commands (poo
 - **RAID_Array**: An mdadm software RAID array composed of same-sized Slices from different disks
 - **Volume_Group**: An LVM volume group that aggregates all RAID_Arrays in a single Pool as physical volumes
 - **Logical_Volume**: An LVM logical volume created on top of the Volume_Group, presented as the usable storage
-- **Parity_Mode**: The redundancy level — SHR-1 (single parity, RAID 5 behavior) or SHR-2 (double parity, RAID 6 behavior)
+- **Parity_Mode**: The redundancy level — parity1 (single parity, RAID 5 behavior) or parity2 (double parity, RAID 6 behavior)
 - **Disk_Descriptor**: A block device path (e.g., /dev/sdb) identifying a physical disk managed by PoolForge
 - **Partition_Table**: The GPT partition layout PoolForge creates on each managed disk
 - **Metadata_Store**: A persistent record of Pool configuration, disk membership, Capacity_Tiers, and RAID_Array mappings, stored as JSON with atomic writes
@@ -68,8 +68,8 @@ Phase 2 MUST NOT break any Phase 1 functionality. All existing CLI commands (poo
 2. WHEN a Hot_Spare disk is available in the Pool, THE PoolForge SHALL automatically initiate a Rebuild of each degraded RAID_Array using the spare disk.
 3. WHEN a Rebuild completes for a RAID_Array, THE PoolForge SHALL update the Metadata_Store to reflect the restored healthy state and log the completion with the RAID_Array identifier and timestamp.
 4. IF multiple RAID_Arrays are degraded due to the same disk failure, THEN THE PoolForge SHALL rebuild all affected RAID_Arrays using the replacement or spare disk.
-5. IF a second disk fails while a Rebuild is in progress in SHR-1 Parity_Mode, THEN THE PoolForge SHALL mark the affected RAID_Arrays as failed and log a critical alert identifying the two failed Disk_Descriptors.
-6. IF a second disk fails while a Rebuild is in progress in SHR-2 Parity_Mode, THEN THE PoolForge SHALL continue operating in Degraded_State and log a warning alert identifying the two failed Disk_Descriptors.
+5. IF a second disk fails while a Rebuild is in progress in parity1 Parity_Mode, THEN THE PoolForge SHALL mark the affected RAID_Arrays as failed and log a critical alert identifying the two failed Disk_Descriptors.
+6. IF a second disk fails while a Rebuild is in progress in parity2 Parity_Mode, THEN THE PoolForge SHALL continue operating in Degraded_State and log a warning alert identifying the two failed Disk_Descriptors.
 7. THE HealthMonitor SHALL listen for mdadm events continuously while the PoolForge service is running, processing failure events within 10 seconds of receipt.
 8. WHEN the HealthMonitor detects a disk failure, THE HealthMonitor SHALL identify all RAID_Arrays containing Slices from the failed disk and trigger Rebuild for each degraded array.
 9. THE PoolForge SHALL persist Rebuild progress in the Metadata_Store so that Rebuild state survives service restarts.

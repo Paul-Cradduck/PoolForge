@@ -39,6 +39,7 @@ func main() {
 	var createParity string
 	var createName string
 	var createSnapReserve int
+	var createExternal bool
 	createCmd := &cobra.Command{
 		Use:   "create",
 		Short: "Create a new storage pool",
@@ -49,7 +50,7 @@ func main() {
 			}
 			disks := strings.Split(createDisks, ",")
 			p, err := eng.CreatePool(context.Background(), engine.CreatePoolRequest{
-				Name: createName, Disks: disks, ParityMode: pm, SnapshotReserve: createSnapReserve,
+				Name: createName, Disks: disks, ParityMode: pm, SnapshotReserve: createSnapReserve, External: createExternal,
 			})
 			if err != nil {
 				return err
@@ -65,9 +66,10 @@ func main() {
 		},
 	}
 	createCmd.Flags().StringVar(&createDisks, "disks", "", "Comma-separated disk devices")
-	createCmd.Flags().StringVar(&createParity, "parity", "shr1", "Parity mode: shr1 or shr2")
+	createCmd.Flags().StringVar(&createParity, "parity", "parity1", "Parity mode: parity1 or parity2")
 	createCmd.Flags().StringVar(&createName, "name", "", "Pool name")
 	createCmd.Flags().IntVar(&createSnapReserve, "snapshot-reserve", 10, "Snapshot reserve percent")
+	createCmd.Flags().BoolVar(&createExternal, "external", false, "Mark pool as external enclosure (manual start required)")
 	createCmd.MarkFlagRequired("disks")
 	createCmd.MarkFlagRequired("name")
 	pool.AddCommand(createCmd)
@@ -309,6 +311,86 @@ func main() {
 			fmt.Printf("%-20s %-12s %-10s %-8s\n", "NAME", "PROTOCOLS", "READ-ONLY", "GUEST")
 			for _, s := range p.Shares {
 				fmt.Printf("%-20s %-12s %-10v %-8v\n", s.Name, strings.Join(s.Protocols, ","), s.ReadOnly, s.SMBPublic)
+			}
+			return nil
+		},
+	})
+
+	// pool start
+	var startForce bool
+	startCmd := &cobra.Command{
+		Use:   "start [pool-name]",
+		Short: "Start a stopped pool (assemble arrays, mount filesystem)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			fmt.Printf("Starting pool '%s'...\n", args[0])
+			result, err := eng.StartPool(context.Background(), args[0], startForce)
+			if err != nil {
+				return err
+			}
+			if len(result.Warnings) > 0 && len(result.ArrayResults) == 0 {
+				for _, w := range result.Warnings {
+					fmt.Printf("  Warning: %s\n", w)
+				}
+				return fmt.Errorf("start aborted — use --force to proceed")
+			}
+			for _, ar := range result.ArrayResults {
+				status := string(ar.State)
+				extra := ""
+				for _, p := range ar.ReAddedParts {
+					extra += fmt.Sprintf(" → re-added %s", p)
+				}
+				for _, p := range ar.FullRebuilds {
+					extra += fmt.Sprintf(" → rebuilding %s", p)
+				}
+				fmt.Printf("  %s (tier %d): %s%s\n", ar.Device, ar.TierIndex, status, extra)
+			}
+			fmt.Printf("\nPool '%s' is now RUNNING.\n  Mount: %s\n", args[0], result.MountPoint)
+			return nil
+		},
+	}
+	startCmd.Flags().BoolVar(&startForce, "force", false, "Skip drive count confirmation")
+	pool.AddCommand(startCmd)
+
+	// pool stop
+	pool.AddCommand(&cobra.Command{
+		Use:   "stop [pool-name]",
+		Short: "Stop a running pool (unmount, stop arrays)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			fmt.Printf("Stopping pool '%s'...\n", args[0])
+			if err := eng.StopPool(context.Background(), args[0]); err != nil {
+				return err
+			}
+			fmt.Println("\nIt is now SAFE to power down the external enclosure.")
+			return nil
+		},
+	})
+
+	// pool set-autostart
+	pool.AddCommand(&cobra.Command{
+		Use:   "set-autostart [pool-name] [true|false]",
+		Short: "Configure whether a pool auto-starts at boot",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			var autoStart bool
+			switch args[1] {
+			case "true":
+				autoStart = true
+			case "false":
+				autoStart = false
+			default:
+				return fmt.Errorf("auto-start must be true or false, got %q", args[1])
+			}
+			if err := eng.SetAutoStart(context.Background(), args[0], autoStart); err != nil {
+				return err
+			}
+			// Regenerate boot config
+			safety.GenerateBootConfigFromMetadata(meta)
+			if autoStart {
+				fmt.Printf("Auto-start enabled for pool '%s'\n", args[0])
+			} else {
+				fmt.Printf("Auto-start disabled for pool '%s'. Manual start required.\n", args[0])
 			}
 			return nil
 		},
@@ -569,6 +651,7 @@ func main() {
 				AlertConfig:   safety.AlertConfig{WebhookURL: webhookURL},
 				SMARTInterval: 5 * 60 * 1000000000,  // 5 min
 				ScrubInterval: 7 * 24 * 3600000000000, // 7 days
+				RAIDManager:   storage.NewRAIDManager(),
 			})
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()

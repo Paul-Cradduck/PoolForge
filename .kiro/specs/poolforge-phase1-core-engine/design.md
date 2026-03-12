@@ -4,7 +4,7 @@
 
 Phase 1 of PoolForge delivers the foundational storage management engine: capacity-tier computation from mixed-size disks, GPT disk partitioning, mdadm RAID array creation per tier, LVM stitching (PV → VG → LV), ext4 filesystem creation, a CLI for pool management (`pool create`, `pool status`, `pool list`), a JSON-based metadata store with atomic writes, and an automated AWS-based test infrastructure (Terraform + EC2 + EBS + Test_Runner).
 
-PoolForge replicates Synology Hybrid RAID (SHR) functionality using standard Linux storage tools. The key insight is the capacity-tier algorithm: given mixed-size disks, it computes tiers based on differences between sorted unique capacities, partitions each disk into slices matching eligible tiers, creates one mdadm RAID array per tier, and stitches all arrays into a single LVM volume group presented as one ext4 logical volume.
+PoolForge replicates hybrid RAID functionality using standard Linux storage tools. The key insight is the capacity-tier algorithm: given mixed-size disks, it computes tiers based on differences between sorted unique capacities, partitions each disk into slices matching eligible tiers, creates one mdadm RAID array per tier, and stitches all arrays into a single LVM volume group presented as one ext4 logical volume.
 
 Phase 1 establishes the interfaces (`EngineService`, storage abstraction, `MetadataStore`) that subsequent phases extend without breaking changes.
 
@@ -80,7 +80,7 @@ sequenceDiagram
     participant Storage
     participant Metadata
 
-    Admin->>CLI: poolforge pool create --disks ... --parity shr1 --name mypool
+    Admin->>CLI: poolforge pool create --disks ... --parity parity1 --name mypool
     CLI->>Engine: CreatePool(ctx, CreatePoolRequest)
     Engine->>Engine: Validate inputs (≥2 disks, no conflicts)
     Engine->>Engine: ComputeCapacityTiers(diskCapacities)
@@ -107,8 +107,8 @@ The central orchestrator for pool operations in Phase 1.
 type ParityMode int
 
 const (
-    SHR1 ParityMode = iota // Single parity (RAID5 / RAID1)
-    SHR2                    // Double parity (RAID6 / RAID5 / RAID1)
+    Parity1 ParityMode = iota // Single parity (RAID5 / RAID1)
+    Parity2                    // Double parity (RAID6 / RAID5 / RAID1)
 )
 
 // State types for the three-level hierarchy
@@ -236,7 +236,7 @@ type EngineService interface {
 
 #### Capacity Tier Computation Algorithm
 
-The tier computation is the core algorithm that differentiates SHR from standard RAID. It maximizes usable capacity by grouping equal-sized slices across disks into separate RAID arrays.
+The tier computation is the core algorithm that differentiates PoolForge from standard RAID. It maximizes usable capacity by grouping equal-sized slices across disks into separate RAID arrays.
 
 ```
 Input:  disks[]  — list of disks with their capacities in bytes
@@ -267,7 +267,7 @@ Algorithm:
 | Tier 1 | sliceSize = 2 TB − 1 TB = 1 TB | Eligible: 3 disks (capacity ≥ 2 TB) |
 | Tier 2 | sliceSize = 4 TB − 2 TB = 2 TB | Eligible: 1 disk (capacity ≥ 4 TB) |
 
-Tier 2 has only 1 eligible disk — insufficient for any RAID level. This tier is skipped (no redundancy possible with a single disk). The pool uses Tier 0 (4-disk RAID 5) + Tier 1 (3-disk RAID 5) under SHR-1.
+Tier 2 has only 1 eligible disk — insufficient for any RAID level. This tier is skipped (no redundancy possible with a single disk). The pool uses Tier 0 (4-disk RAID 5) + Tier 1 (3-disk RAID 5) under parity1.
 
 **Note on minimum eligible disks**: A tier requires at least 2 eligible disks to form any RAID array. Tiers with fewer than 2 eligible disks are skipped.
 
@@ -275,11 +275,11 @@ Tier 2 has only 1 eligible disk — insufficient for any RAID level. This tier i
 
 | Parity Mode | Eligible Disk Count | RAID Level |
 |-------------|-------------------|------------|
-| SHR-1       | ≥ 3               | RAID 5     |
-| SHR-1       | 2                 | RAID 1     |
-| SHR-2       | ≥ 4               | RAID 6     |
-| SHR-2       | 3                 | RAID 5     |
-| SHR-2       | 2                 | RAID 1     |
+| parity1       | ≥ 3               | RAID 5     |
+| parity1       | 2                 | RAID 1     |
+| parity2       | ≥ 4               | RAID 6     |
+| parity2       | 3                 | RAID 5     |
+| parity2       | 2                 | RAID 1     |
 
 ### 2. Storage Abstraction Layer (`internal/storage`)
 
@@ -410,7 +410,7 @@ Atomic write sequence:
 Phase 1 commands only:
 
 ```
-poolforge pool create --disks /dev/sdb,/dev/sdc,/dev/sdd --parity shr1 --name mypool
+poolforge pool create --disks /dev/sdb,/dev/sdc,/dev/sdd --parity parity1 --name mypool
 poolforge pool status <pool-name>
 poolforge pool list
 ```
@@ -490,7 +490,7 @@ Key guarantees:
     "<pool-id>": {
       "id": "<uuid>",
       "name": "<pool-name>",
-      "parity_mode": "shr1|shr2",
+      "parity_mode": "parity1|parity2",
       "state": "healthy|degraded|failed",
       "disks": [
         {
@@ -567,7 +567,7 @@ Property numbering follows the master design document (P1–P37) for traceabilit
 
 ### Property 4: RAID level selection follows parity mode and disk count rules
 
-*For any* parity mode (SHR-1 or SHR-2) and any eligible disk count for a capacity tier, the selected RAID level should match the selection table: SHR-1 with ≥3 disks → RAID 5, SHR-1 with 2 disks → RAID 1, SHR-2 with ≥4 disks → RAID 6, SHR-2 with 3 disks → RAID 5, SHR-2 with 2 disks → RAID 1.
+*For any* parity mode (parity1 or parity2) and any eligible disk count for a capacity tier, the selected RAID level should match the selection table: parity1 with ≥3 disks → RAID 5, parity1 with 2 disks → RAID 1, parity2 with ≥4 disks → RAID 6, parity2 with 3 disks → RAID 5, parity2 with 2 disks → RAID 1.
 
 **Validates: Requirements 1.5, 1.6, 1.7, 1.8, 1.9**
 
@@ -628,7 +628,7 @@ Property numbering follows the master design document (P1–P37) for traceabilit
 | Fewer than 2 disks provided | Reject with error: "minimum 2 disks required, got N" | 1.12 |
 | Disk already in another pool | Reject with error: "disk /dev/sdX is already a member of pool 'Y'" | 1.13, 2.3 |
 | Invalid disk descriptor (not a block device) | Reject with error: "device /dev/sdX is not a valid block device" | — |
-| Invalid parity mode | Reject with error: "unsupported parity mode, use shr1 or shr2" | — |
+| Invalid parity mode | Reject with error: "unsupported parity mode, use parity1 or parity2" | — |
 | Pool name already exists | Reject with error: "pool name 'X' already exists" | 1.14 |
 | Pool not found (status/get) | Reject with error: "pool 'X' not found" | — |
 
@@ -685,7 +685,7 @@ PoolForge Phase 1 uses both unit tests and property-based tests as complementary
 Unit tests focus on:
 
 - **Specific examples**: 3 disks of 1 TB/2 TB/4 TB → expected tiers, RAID levels, slice counts
-- **Edge cases**: Minimum disk count rejection (Req 1.12), all-same-size disks (single tier), SHR-2 with exactly 2 disks → RAID 1
+- **Edge cases**: Minimum disk count rejection (Req 1.12), all-same-size disks (single tier), parity2 with exactly 2 disks → RAID 1
 - **Error conditions**: Invalid disk descriptors, duplicate disk in pool, pool not found
 - **Metadata operations**: Save/load specific pool configurations, handle missing metadata file
 

@@ -343,9 +343,9 @@ func restorePool(raw json.RawMessage, liveMDs []liveMDInfo, currentDisks []curre
 	exec.Command("mount", lvPath, rec.MountPoint).Run()
 
 	// Build and save Pool
-	pm := SHR1
-	if rec.ParityMode == "shr2" {
-		pm = SHR2
+	pm := Parity1
+	if rec.ParityMode == "parity2" {
+		pm = Parity2
 	}
 	pool := &Pool{
 		ID: rec.ID, Name: rec.Name, ParityMode: pm,

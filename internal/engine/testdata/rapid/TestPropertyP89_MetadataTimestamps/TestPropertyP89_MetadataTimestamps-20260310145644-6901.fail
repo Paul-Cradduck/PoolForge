@@ -1,0 +1,6 @@
+# 2026/03/10 14:56:44.273516 [TestPropertyP89_MetadataTimestamps] should be Running after start
+# 2026/03/10 14:56:44.273540 [TestPropertyP89_MetadataTimestamps] LastStartup should be within operation window
+# 2026/03/10 14:56:44.273551 [TestPropertyP89_MetadataTimestamps] should be Safe_To_Power_Down after stop
+# 2026/03/10 14:56:44.273552 [TestPropertyP89_MetadataTimestamps] LastShutdown should be within operation window
+# 
+v0.4.8#6719869987139516056

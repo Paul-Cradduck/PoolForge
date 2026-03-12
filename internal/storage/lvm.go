@@ -129,3 +129,29 @@ func (l *lvmManager) RestoreMissingPV(vgName string, device string) error {
 	}
 	return nil
 }
+
+// Phase 5: Activate/Deactivate methods
+
+func (l *lvmManager) ActivateVolumeGroup(name string) error {
+	out, err := exec.Command("vgchange", "-ay", name).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("vgchange -ay %s: %w\n%s", name, err, out)
+	}
+	return nil
+}
+
+func (l *lvmManager) DeactivateVolumeGroup(name string) error {
+	out, err := exec.Command("vgchange", "-an", name).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("vgchange -an %s: %w\n%s", name, err, out)
+	}
+	return nil
+}
+
+func (l *lvmManager) DeactivateLogicalVolume(lvPath string) error {
+	out, err := exec.Command("lvchange", "-an", lvPath).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("lvchange -an %s: %w\n%s", lvPath, err, out)
+	}
+	return nil
+}

@@ -71,7 +71,7 @@ ssh -o StrictHostKeyChecking=no -i "$SSH_KEY" ubuntu@"$INSTANCE_IP" "
     echo '=== Test 1: Pool creation with mixed-size disks ==='
     # Use first 4 devices for pool1
     POOL1_DISKS=\$(echo \$DISKS | cut -d, -f1-4)
-    sudo poolforge pool create --name testpool1 --disks \$POOL1_DISKS --parity shr1
+    sudo poolforge pool create --name testpool1 --disks \$POOL1_DISKS --parity parity1
     sudo poolforge pool status testpool1
     echo 'PASS: Pool creation'
 
@@ -89,14 +89,14 @@ ssh -o StrictHostKeyChecking=no -i "$SSH_KEY" ubuntu@"$INSTANCE_IP" "
     echo ''
     echo '=== Test 4: Multi-pool isolation ==='
     POOL2_DISKS=\$(echo \$DISKS | cut -d, -f5-6)
-    sudo poolforge pool create --name testpool2 --disks \$POOL2_DISKS --parity shr1
+    sudo poolforge pool create --name testpool2 --disks \$POOL2_DISKS --parity parity1
     sudo poolforge pool list
     echo 'PASS: Multi-pool isolation'
 
     echo ''
     echo '=== Test 5: Disk conflict rejection ==='
     CONFLICT_DISK=\$(echo \$DISKS | cut -d, -f1)
-    if sudo poolforge pool create --name conflictpool --disks \$CONFLICT_DISK,\$(echo \$DISKS | cut -d, -f5) --parity shr1 2>&1; then
+    if sudo poolforge pool create --name conflictpool --disks \$CONFLICT_DISK,\$(echo \$DISKS | cut -d, -f5) --parity parity1 2>&1; then
         echo 'FAIL: Should have rejected conflicting disk'
         exit 1
     else

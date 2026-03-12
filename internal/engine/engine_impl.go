@@ -13,12 +13,13 @@ import (
 )
 
 type engineImpl struct {
-	disk   storage.DiskManager
-	raid   storage.RAIDManager
-	lvm    storage.LVMManager
-	fs     storage.FilesystemManager
-	meta   MetadataStore
-	shares *sharing.ShareManager
+	disk      storage.DiskManager
+	raid      storage.RAIDManager
+	lvm       storage.LVMManager
+	fs        storage.FilesystemManager
+	meta      MetadataStore
+	shares    *sharing.ShareManager
+	stopDelay time.Duration // Phase 5: delay between array stops (default 1s)
 }
 
 func NewEngine(disk storage.DiskManager, raid storage.RAIDManager, lvm storage.LVMManager, fs storage.FilesystemManager, meta MetadataStore) EngineService {
@@ -138,6 +139,7 @@ func (e *engineImpl) CreatePool(ctx context.Context, req CreatePoolRequest) (*Po
 			TierIndex: tiers[ti].Index,
 			State:     ArrayHealthy,
 			Members:   members,
+			UUID:      func() string { u, _ := e.raid.GetArrayUUID(info.Device); return u }(),
 		})
 	}
 
@@ -189,6 +191,9 @@ func (e *engineImpl) CreatePool(ctx context.Context, req CreatePoolRequest) (*Po
 		SnapshotConfig: SnapshotConfig{ReservePercent: snapReserve},
 		CreatedAt:     now,
 		UpdatedAt:     now,
+		IsExternal:          req.External,
+		RequiresManualStart: req.External,
+		OperationalStatus:   PoolRunning,
 	}
 
 	if err := e.meta.SavePool(pool); err != nil {

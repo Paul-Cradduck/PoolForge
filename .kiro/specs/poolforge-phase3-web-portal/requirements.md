@@ -2,7 +2,7 @@
 
 ## Introduction
 
-This document specifies the requirements for Phase 3 of the PoolForge project. PoolForge is an open-source storage management tool for Ubuntu LTS (24.04+) that replicates Synology Hybrid RAID (SHR) functionality using mdadm and LVM. The full project scope is defined in the master spec at `.kiro/specs/hybrid-raid-manager/`. Phase 1 is defined at `.kiro/specs/poolforge-phase1-core-engine/`. Phase 2 is defined at `.kiro/specs/poolforge-phase2-lifecycle/`.
+This document specifies the requirements for Phase 3 of the PoolForge project. PoolForge is an open-source storage management tool for Ubuntu LTS (24.04+) that replicates hybrid RAID functionality using mdadm and LVM. The full project scope is defined in the master spec at `.kiro/specs/hybrid-raid-manager/`. Phase 1 is defined at `.kiro/specs/poolforge-phase1-core-engine/`. Phase 2 is defined at `.kiro/specs/poolforge-phase2-lifecycle/`.
 
 Phase 1 established the core engine: capacity-tier computation from mixed-size disks, GPT disk partitioning, mdadm RAID array creation, LVM stitching (PV → VG → LV), ext4 filesystem creation, a CLI for pool creation/status/list, a JSON-based metadata store with atomic writes, and the automated cloud-based test infrastructure (Terraform IaC for EC2 + EBS, Test_Runner script). Phase 1 defined and implemented the core interfaces: EngineService (CreatePool, GetPool, ListPools, GetPoolStatus), StorageAbstraction (DiskManager, RAIDManager, LVMManager, FilesystemManager), and MetadataStore (SavePool, LoadPool, ListPools).
 
@@ -36,7 +36,7 @@ Phase 3 MUST NOT break any Phase 1 or Phase 2 functionality. All existing CLI co
 - **RAID_Array**: An mdadm software RAID array composed of same-sized Slices from different disks
 - **Volume_Group**: An LVM volume group that aggregates all RAID_Arrays in a single Pool as physical volumes
 - **Logical_Volume**: An LVM logical volume created on top of the Volume_Group, presented as the usable storage
-- **Parity_Mode**: The redundancy level — SHR-1 (single parity, RAID 5 behavior) or SHR-2 (double parity, RAID 6 behavior)
+- **Parity_Mode**: The redundancy level — parity1 (single parity, RAID 5 behavior) or parity2 (double parity, RAID 6 behavior)
 - **Disk_Descriptor**: A block device path (e.g., /dev/sdb) identifying a physical disk managed by PoolForge
 - **Metadata_Store**: A persistent record of Pool configuration, disk membership, Capacity_Tiers, and RAID_Array mappings
 - **Rebuild**: The process of reconstructing redundancy in a degraded RAID_Array after a disk failure
