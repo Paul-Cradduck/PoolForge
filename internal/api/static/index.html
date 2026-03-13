@@ -188,7 +188,7 @@ tbody tr:nth-child(even) td { background: rgba(134,134,134,0.045); }
     <li class="nav-item" onclick="navigate('monitoring')"><span class="icon">📈</span> Monitoring</li>
     <li class="nav-item" onclick="navigate('safety')"><span class="icon">🛡️</span> Safety</li>
     <li class="nav-item" onclick="navigate('logs')"><span class="icon">📋</span> Logs</li>
-    <li class="nav-item" onclick="navigate('settings')"><span class="icon">⚙️</span> Settings</li>
+    <li class="nav-item" onclick="navigate('settings')"><span class="icon">⚙️</span> Settings <span id="updateBadge" style="display:none;background:var(--green);color:#000;font-size:9px;padding:1px 5px;border-radius:8px;margin-left:4px">UPDATE</span></li>
   </ul>
 </nav>
 <div class="main-area">
@@ -410,7 +410,7 @@ tbody tr:nth-child(even) td { background: rgba(134,134,134,0.045); }
       <div style="font-size:11px;color:var(--muted);margin-top:0.5rem">Changes require a service restart to take effect.</div>
     </div>
     <div class="card">
-      <h2>🔄 Software Update</h2>
+      <h2>🔄 Software Update <button onclick="checkForUpdate()" style="font-size:0.7rem;padding:0.15em 0.5em;margin-left:0.5rem">Check Now</button></h2>
       <div id="updateStatus" style="font-size:13px;color:var(--muted)">Checking for updates...</div>
       <button id="updateBtn" class="primary" onclick="applyUpdate()" style="margin-top:0.75rem;display:none">Update Now</button>
     </div>
@@ -1557,17 +1557,20 @@ async function saveAdminSettings() {
 async function checkForUpdate() {
   const el = document.getElementById('updateStatus');
   const btn = document.getElementById('updateBtn');
+  const badge = document.getElementById('updateBadge');
   try {
     const r = await api('/admin/update-check');
     if (r.update_available) {
-      el.innerHTML = `Current: <b>v${r.current}</b> → Available: <b style="color:var(--green)">v${r.latest}</b>` +
+      if (el) el.innerHTML = `Current: <b>v${r.current}</b> → Available: <b style="color:var(--green)">v${r.latest}</b>` +
         (r.release_notes ? `<div style="margin-top:6px;font-size:11px;white-space:pre-wrap;max-height:100px;overflow-y:auto;color:var(--text)">${r.release_notes}</div>` : '');
-      btn.style.display = '';
+      if (btn) btn.style.display = '';
+      badge.style.display = '';
     } else {
-      el.innerHTML = `Running <b>v${r.current}</b> — up to date ✓`;
-      btn.style.display = 'none';
+      if (el) el.innerHTML = `Running <b>v${r.current}</b> — up to date ✓`;
+      if (btn) btn.style.display = 'none';
+      badge.style.display = 'none';
     }
-  } catch(e) { el.textContent = 'Could not check for updates'; }
+  } catch(e) { if (el) el.textContent = 'Could not check for updates'; }
 }
 
 async function applyUpdate() {
@@ -1632,6 +1635,7 @@ async function refreshSettings() {
 // Initial load
 api('/version').then(r => { document.getElementById('versionBadge').textContent = 'v' + r.version; }).catch(()=>{});
 api('/admin/settings').then(r => { if (r.node_name) document.getElementById('nodeNameHeader').textContent = r.node_name; }).catch(()=>{});
+checkForUpdate();
 refresh();
 refreshAlerts();
 refreshLogs();
