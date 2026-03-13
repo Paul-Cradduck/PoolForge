@@ -1956,8 +1956,10 @@ setInterval(() => { if (monitorSSE) { refreshClients(); refreshProtocolStatus();
 async function createSnapshot(poolID) {
   const name = prompt('Snapshot name (leave empty for auto-generated):','');
   if (name === null) return;
+  const clean = name.trim().replace(/\s+/g, '_');
+  if (clean && !/^[a-zA-Z0-9_.\-]+$/.test(clean)) { toast('Snapshot name can only contain letters, numbers, _ . -', true); return; }
   try {
-    const body = name.trim() ? {name: name.trim()} : {};
+    const body = clean ? {name: clean} : {};
     const snap = await api('/pools/' + poolID + '/snapshots', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
     toast('Snapshot ' + (snap.name || '') + ' created');
     refresh();

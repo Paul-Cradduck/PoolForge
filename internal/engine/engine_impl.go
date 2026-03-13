@@ -517,6 +517,12 @@ func (e *engineImpl) CreateSnapshot(ctx context.Context, poolID string, name str
 	if name == "" {
 		name = snapshots.GenerateName()
 	}
+	name = strings.ReplaceAll(name, " ", "_")
+	for _, c := range name {
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '.' || c == '-') {
+			return nil, fmt.Errorf("snapshot name contains invalid character: %c", c)
+		}
+	}
 	if err := snapshots.Create(pool.VolumeGroup, pool.LogicalVolume, name); err != nil {
 		return nil, fmt.Errorf("create snapshot: %w", err)
 	}
