@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -304,7 +305,7 @@ func (e *engineImpl) GetPoolStatus(ctx context.Context, poolID string) (*PoolSta
 		status.DiskStatuses = append(status.DiskStatuses, DiskStatusInfo{
 			Device: d.Device, State: d.State, ContributingArrays: contributing,
 			CapacityBytes: d.CapacityBytes, Label: d.Label,
-			Serial: getDiskSerial(d.Device), EnclosureSlot: getEnclosureSlot(d.Device),
+			Serial: GetDiskSerial(d.Device), EnclosureSlot: getEnclosureSlot(d.Device),
 		})
 	}
 	if usage, err := e.fs.GetUsage(pool.MountPoint); err == nil {
@@ -332,7 +333,35 @@ func (e *engineImpl) SetDiskLabel(ctx context.Context, device string, label stri
 			}
 		}
 	}
-	return fmt.Errorf("device %s not found in any pool", device)
+	// Not in a pool — store in standalone labels file
+	return saveStandaloneDiskLabel(device, label)
+}
+
+const diskLabelsFile = "/var/lib/poolforge/disk_labels.json"
+
+func loadStandaloneDiskLabels() map[string]string {
+	labels := map[string]string{}
+	data, err := os.ReadFile(diskLabelsFile)
+	if err != nil {
+		return labels
+	}
+	json.Unmarshal(data, &labels)
+	return labels
+}
+
+func saveStandaloneDiskLabel(device, label string) error {
+	labels := loadStandaloneDiskLabels()
+	if label == "" {
+		delete(labels, device)
+	} else {
+		labels[device] = label
+	}
+	data, _ := json.MarshalIndent(labels, "", "  ")
+	return os.WriteFile(diskLabelsFile, data, 0600)
+}
+
+func GetStandaloneDiskLabel(device string) string {
+	return loadStandaloneDiskLabels()[device]
 }
 
 // remapDiskDevices checks if disk device names have changed (e.g. after eSATA
@@ -401,7 +430,7 @@ func (e *engineImpl) remapDiskDevices(pool *Pool) bool {
 	return true
 }
 
-func getDiskSerial(device string) string {
+func GetDiskSerial(device string) string {
 	name := strings.TrimPrefix(device, "/dev/")
 	// Try sysfs first
 	if data, err := os.ReadFile("/sys/block/" + name + "/device/serial"); err == nil {

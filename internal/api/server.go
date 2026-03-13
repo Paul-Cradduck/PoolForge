@@ -425,14 +425,24 @@ func (s *Server) handleDisks(w http.ResponseWriter, r *http.Request) {
 		sizeBytes := readSysBlockSize(name)
 		poolName := used[dev]
 		dm := diskMeta[dev]
+		label := dm.Label
+		serial := dm.Serial
+		if poolName == "" {
+			if label == "" {
+				label = engine.GetStandaloneDiskLabel(dev)
+			}
+			if serial == "" {
+				serial = engine.GetDiskSerial(dev)
+			}
+		}
 		devs = append(devs, blockDev{
 			Device: dev,
 			SizeGB: float64(sizeBytes) / (1024 * 1024 * 1024),
 			InUse:  poolName != "",
 			Pool:   poolName,
-			Serial: dm.Serial,
+			Serial: serial,
 			Slot:   dm.EnclosureSlot,
-			Label:  dm.Label,
+			Label:  label,
 		})
 	}
 	jsonResp(w, devs)
