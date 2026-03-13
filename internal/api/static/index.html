@@ -410,6 +410,11 @@ tbody tr:nth-child(even) td { background: rgba(134,134,134,0.045); }
       <div style="font-size:11px;color:var(--muted);margin-top:0.5rem">Changes require a service restart to take effect.</div>
     </div>
     <div class="card">
+      <h2>🔄 Software Update</h2>
+      <div id="updateStatus" style="font-size:13px;color:var(--muted)">Checking for updates...</div>
+      <button id="updateBtn" class="primary" onclick="applyUpdate()" style="margin-top:0.75rem;display:none">Update Now</button>
+    </div>
+    <div class="card">
       <h2>⚙️ Pool Settings</h2>
       <div id="settingsPoolList"></div>
     </div>
@@ -1549,8 +1554,36 @@ async function saveAdminSettings() {
   } catch(e) { toast(e.message, true); }
 }
 
+async function checkForUpdate() {
+  const el = document.getElementById('updateStatus');
+  const btn = document.getElementById('updateBtn');
+  try {
+    const r = await api('/admin/update-check');
+    if (r.update_available) {
+      el.innerHTML = `Current: <b>v${r.current}</b> → Available: <b style="color:var(--green)">v${r.latest}</b>` +
+        (r.release_notes ? `<div style="margin-top:6px;font-size:11px;white-space:pre-wrap;max-height:100px;overflow-y:auto;color:var(--text)">${r.release_notes}</div>` : '');
+      btn.style.display = '';
+    } else {
+      el.innerHTML = `Running <b>v${r.current}</b> — up to date ✓`;
+      btn.style.display = 'none';
+    }
+  } catch(e) { el.textContent = 'Could not check for updates'; }
+}
+
+async function applyUpdate() {
+  if (!confirm('Download and install the latest version? The service will restart.')) return;
+  toast('Downloading update...');
+  document.getElementById('updateBtn').disabled = true;
+  try {
+    const r = await api('/admin/update', { method: 'POST' });
+    toast('Update installed — restarting...');
+    setTimeout(() => location.reload(), 3000);
+  } catch(e) { toast(e.message, true); document.getElementById('updateBtn').disabled = false; }
+}
+
 async function refreshSettings() {
   refreshProtocolStatus();
+  checkForUpdate();
   // Load admin settings
   try {
     const admin = await api('/admin/settings');

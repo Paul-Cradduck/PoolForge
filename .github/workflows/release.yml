@@ -1,0 +1,31 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Build
+        run: |
+          GOOS=linux GOARCH=amd64 go build -o poolforge-linux-amd64 ./cmd/poolforge
+          GOOS=linux GOARCH=arm64 go build -o poolforge-linux-arm64 ./cmd/poolforge
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            poolforge-linux-amd64
+            poolforge-linux-arm64

@@ -5,11 +5,13 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -92,6 +94,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/protocols/config", s.handleProtocolConfig)
 	s.mux.HandleFunc("/api/admin/settings", s.handleAdminSettings)
 	s.mux.HandleFunc("/api/admin/restart", s.handleAdminRestart)
+	s.mux.HandleFunc("/api/admin/update-check", s.handleUpdateCheck)
+	s.mux.HandleFunc("/api/admin/update", s.handleUpdate)
 	s.mux.HandleFunc("/api/pair/init", s.handlePairInit)
 	s.mux.HandleFunc("/api/pair/exchange", s.handlePairExchange)
 	s.mux.HandleFunc("/api/internal/pools", s.handleInternalPools)
@@ -1323,6 +1327,104 @@ func (s *Server) handleAdminRestart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	jsonResp(w, map[string]bool{"ok": true})
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		exec.Command("systemctl", "restart", "poolforge").Run()
+	}()
+}
+
+const ghRepo = "Paul-Cradduck/PoolForge"
+
+func (s *Server) handleUpdateCheck(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", ghRepo))
+	if err != nil {
+		httpError(w, fmt.Errorf("failed to check for updates: %w", err), http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+	var release struct {
+		TagName string `json:"tag_name"`
+		Body    string `json:"body"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil || release.TagName == "" {
+		jsonResp(w, map[string]interface{}{"current": s.version, "latest": s.version, "update_available": false})
+		return
+	}
+	latest := strings.TrimPrefix(release.TagName, "v")
+	jsonResp(w, map[string]interface{}{
+		"current":          s.version,
+		"latest":           latest,
+		"update_available": latest != s.version,
+		"release_notes":    release.Body,
+	})
+}
+
+func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	s.logInfo("update: checking for new version...")
+	arch := runtime.GOARCH
+	url := fmt.Sprintf("https://github.com/%s/releases/latest/download/poolforge-linux-%s", ghRepo, arch)
+
+	client := &http.Client{Timeout: 120 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		s.logError("update: download failed: %v", err)
+		httpError(w, fmt.Errorf("download failed: %w", err), http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		s.logError("update: binary not found at %s (HTTP %d)", url, resp.StatusCode)
+		httpError(w, fmt.Errorf("release binary not found (HTTP %d)", resp.StatusCode), resp.StatusCode)
+		return
+	}
+
+	// Write to temp file
+	tmp, err := os.CreateTemp("", "poolforge-update-*")
+	if err != nil {
+		httpError(w, err, http.StatusInternalServerError)
+		return
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := io.Copy(tmp, resp.Body); err != nil {
+		tmp.Close()
+		httpError(w, fmt.Errorf("download incomplete: %w", err), http.StatusBadGateway)
+		return
+	}
+	tmp.Close()
+	os.Chmod(tmp.Name(), 0755)
+
+	// Get current binary path
+	binPath, _ := exec.LookPath("poolforge")
+	if binPath == "" {
+		binPath = "/usr/local/bin/poolforge"
+	}
+
+	// Replace binary
+	if err := os.Rename(tmp.Name(), binPath); err != nil {
+		// Rename may fail across filesystems, fall back to copy
+		src, _ := os.Open(tmp.Name())
+		dst, err2 := os.Create(binPath)
+		if err2 != nil {
+			httpError(w, fmt.Errorf("failed to replace binary: %w", err2), http.StatusInternalServerError)
+			return
+		}
+		io.Copy(dst, src)
+		src.Close()
+		dst.Close()
+		os.Chmod(binPath, 0755)
+	}
+
+	s.logInfo("update: binary replaced, restarting service...")
+	jsonResp(w, map[string]string{"status": "updated", "message": "Restarting service..."})
 	go func() {
 		time.Sleep(500 * time.Millisecond)
 		exec.Command("systemctl", "restart", "poolforge").Run()
