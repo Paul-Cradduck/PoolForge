@@ -19,7 +19,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var Version = "0.31"
+var Version = "0.32"
 
 func main() {
 	meta := metadata.NewJSONStore("")
