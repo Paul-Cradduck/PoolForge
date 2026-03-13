@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -219,6 +220,9 @@ func (e *engineImpl) ListPools(ctx context.Context) ([]PoolSummary, error) {
 		if err != nil {
 			continue
 		}
+		if e.remapDiskDevices(p) {
+			e.meta.SavePool(p)
+		}
 		usage, err := e.fs.GetUsage(p.MountPoint)
 		if err == nil {
 			summaries[i].TotalCapacityBytes = usage.TotalBytes
@@ -233,6 +237,11 @@ func (e *engineImpl) GetPoolStatus(ctx context.Context, poolID string) (*PoolSta
 	pool, err := e.meta.LoadPool(poolID)
 	if err != nil {
 		return nil, err
+	}
+
+	// Auto-remap disk device names if they changed (e.g. eSATA enclosure power cycle)
+	if e.remapDiskDevices(pool) {
+		e.meta.SavePool(pool)
 	}
 
 	status := &PoolStatus{Pool: *pool}
@@ -324,6 +333,72 @@ func (e *engineImpl) SetDiskLabel(ctx context.Context, device string, label stri
 		}
 	}
 	return fmt.Errorf("device %s not found in any pool", device)
+}
+
+// remapDiskDevices checks if disk device names have changed (e.g. after eSATA
+// enclosure power cycle) by comparing metadata against live mdadm array members.
+// Returns true if any remapping was done.
+func (e *engineImpl) remapDiskDevices(pool *Pool) bool {
+	// Build map of partition → parent disk from metadata
+	// e.g. "/dev/sda1" → "/dev/sda"
+	partToDisk := map[string]string{}
+	for _, d := range pool.Disks {
+		for _, s := range d.Slices {
+			partToDisk[s.PartitionDevice] = d.Device
+		}
+	}
+
+	// Query live arrays to find actual member devices
+	remap := map[string]string{} // old device → new device
+	for _, a := range pool.RAIDArrays {
+		detail, err := e.raid.GetArrayDetail(a.Device)
+		if err != nil {
+			continue
+		}
+		for _, m := range detail.Members {
+			// m.Device is like "/dev/sdj1" — strip partition number to get disk
+			livePart := m.Device
+			liveDisk := strings.TrimRight(livePart, "0123456789")
+			// Find which metadata disk owns this partition
+			if metaDisk, ok := partToDisk[livePart]; ok {
+				// Partition matches metadata — no remap needed for this one
+				_ = metaDisk
+				continue
+			}
+			// Partition not in metadata — check if a different disk letter has this partition number
+			partNum := strings.TrimPrefix(livePart, liveDisk)
+			for metaPart, metaDisk := range partToDisk {
+				metaBase := strings.TrimRight(metaPart, "0123456789")
+				metaNum := strings.TrimPrefix(metaPart, metaBase)
+				if metaNum == partNum && metaBase != liveDisk {
+					// Check if the metadata disk no longer exists
+					if _, err := os.Stat(metaDisk); os.IsNotExist(err) {
+						remap[metaDisk] = liveDisk
+					}
+				}
+			}
+		}
+	}
+
+	if len(remap) == 0 {
+		return false
+	}
+
+	// Apply remapping
+	for i, d := range pool.Disks {
+		if newDev, ok := remap[d.Device]; ok {
+			log.Printf("[remap] disk %s → %s in pool %s", d.Device, newDev, pool.Name)
+			pool.Disks[i].Device = newDev
+			for j, s := range pool.Disks[i].Slices {
+				oldPart := s.PartitionDevice
+				base := strings.TrimRight(oldPart, "0123456789")
+				num := strings.TrimPrefix(oldPart, base)
+				pool.Disks[i].Slices[j].PartitionDevice = newDev + num
+				log.Printf("[remap] partition %s → %s", oldPart, newDev+num)
+			}
+		}
+	}
+	return true
 }
 
 func getDiskSerial(device string) string {
