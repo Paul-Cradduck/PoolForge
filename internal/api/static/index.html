@@ -519,8 +519,8 @@ tbody tr:nth-child(even) td { background: rgba(134,134,134,0.045); }
     <select id="syncJobRemote"></select>
     <label>Local Pool</label>
     <select id="syncJobLocalPool"></select>
-    <label>Remote Pool Mount Path</label>
-    <input id="syncJobRemotePool" placeholder="/mnt/poolforge/replicapool">
+    <label>Remote Pool</label>
+    <select id="syncJobRemotePool"><option value="">-- select remote node first --</option></select>
     <label>Mode</label>
     <select id="syncJobMode"><option value="push">Push</option><option value="pull">Pull</option><option value="bidirectional">Bidirectional</option></select>
     <label>Schedule (e.g. 15m, 1h, empty for manual)</label>
@@ -2036,6 +2036,7 @@ async function refreshPairedNodes() {
     empty.style.display = 'none';
     let rows = '<tr><th>Name</th><th>Host</th><th>Paired</th><th></th></tr>';
     for (const n of nodes) {
+      try { const info = await api('/pair/nodes/' + n.id + '/info'); if (info.node_name) n.name = info.node_name; } catch(e) {}
       const ago = timeAgo(n.paired_at);
       rows += `<tr><td>${n.name}</td><td>${n.host}</td><td>${ago}</td>
         <td><button class="danger" onclick="unpairNode('${n.id}')" style="font-size:11px;padding:2px 8px">Unpair</button></td></tr>`;
@@ -2145,12 +2146,34 @@ async function refreshSyncHistory() {
 
 async function showSyncJobModal() {
   const nodes = await api('/pair/nodes');
-  document.getElementById('syncJobRemote').innerHTML = nodes.map(n => `<option value="${n.id}">${n.name} (${n.host})</option>`).join('');
+  for (const n of nodes) {
+    try { const info = await api('/pair/nodes/' + n.id + '/info'); if (info.node_name) n.name = info.node_name; } catch(e) {}
+  }
+  const remoteEl = document.getElementById('syncJobRemote');
+  remoteEl.innerHTML = nodes.map(n => `<option value="${n.id}">${n.name} (${n.host})</option>`).join('');
+  remoteEl.onchange = () => loadRemotePools(remoteEl.value);
   const pools = await api('/pools');
-  document.getElementById('syncJobLocalPool').innerHTML = pools.map(p => `<option value="${p.ID}">${p.Name}</option>`).join('');
+  document.getElementById('syncJobLocalPool').innerHTML = pools.map(p => `<option value="${p.ID}">${p.Name} (${p.MountPoint})</option>`).join('');
   document.getElementById('syncJobName').value = '';
   document.getElementById('syncJobSchedule').value = '';
+  document.getElementById('syncJobRemotePool').innerHTML = '<option value="">Loading...</option>';
   document.getElementById('syncJobModal').classList.add('active');
+  if (nodes.length > 0) loadRemotePools(nodes[0].id);
+}
+
+async function loadRemotePools(nodeId) {
+  const sel = document.getElementById('syncJobRemotePool');
+  sel.innerHTML = '<option value="">Loading...</option>';
+  try {
+    const pools = await api('/pair/nodes/' + nodeId + '/pools');
+    if (!pools || pools.length === 0) {
+      sel.innerHTML = '<option value="">No pools on remote node</option>';
+      return;
+    }
+    sel.innerHTML = pools.map(p => `<option value="${p.MountPoint}">${p.Name} (${p.MountPoint})</option>`).join('');
+  } catch(e) {
+    sel.innerHTML = '<option value="">Failed to load remote pools</option>';
+  }
 }
 
 async function submitSyncJob() {
@@ -2163,7 +2186,7 @@ async function submitSyncJob() {
     schedule: document.getElementById('syncJobSchedule').value.trim(),
   };
   if (!job.name) return toast('Enter a job name', true);
-  if (!job.remote_pool) return toast('Enter the remote pool mount path', true);
+  if (!job.remote_pool) return toast('Select a remote pool', true);
   try {
     await api('/sync/jobs', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(job) });
     toast('Sync job created');

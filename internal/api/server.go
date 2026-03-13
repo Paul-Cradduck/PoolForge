@@ -58,7 +58,7 @@ func NewWithAuth(eng engine.EngineService, user, pass string) *Server {
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if s.user != "" && r.URL.Path != "/api/pair/exchange" {
+	if s.user != "" && r.URL.Path != "/api/pair/exchange" && r.URL.Path != "/api/internal/pools" && r.URL.Path != "/api/internal/node-info" {
 		u, p, ok := r.BasicAuth()
 		if !ok || u != s.user || p != s.pass {
 			w.Header().Set("WWW-Authenticate", `Basic realm="PoolForge"`)
@@ -94,6 +94,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/admin/restart", s.handleAdminRestart)
 	s.mux.HandleFunc("/api/pair/init", s.handlePairInit)
 	s.mux.HandleFunc("/api/pair/exchange", s.handlePairExchange)
+	s.mux.HandleFunc("/api/internal/pools", s.handleInternalPools)
+	s.mux.HandleFunc("/api/internal/node-info", func(w http.ResponseWriter, r *http.Request) {
+		jsonResp(w, map[string]string{"node_name": readConfVal("POOLFORGE_NODE_NAME", "")})
+	})
 	s.mux.HandleFunc("/api/pair/join", s.handlePairJoin)
 	s.mux.HandleFunc("/api/pair/nodes", s.handlePairNodes)
 	s.mux.HandleFunc("/api/pair/nodes/", s.handlePairNodeDelete)
@@ -1760,6 +1764,27 @@ func (s *Server) handlePairJoin(w http.ResponseWriter, r *http.Request) {
 	jsonResp(w, map[string]bool{"ok": true})
 }
 
+func (s *Server) sshQuery(ctx context.Context, node *engine.PairedNode, apiPath string) ([]byte, error) {
+	sshKey := replication.PrivateKeyPath()
+	cmd := exec.CommandContext(ctx, "ssh", "-i", sshKey, "-o", "StrictHostKeyChecking=no",
+		"-o", "ConnectTimeout=5", fmt.Sprintf("-p%d", node.Port),
+		fmt.Sprintf("root@%s", node.Host),
+		fmt.Sprintf("curl -s http://localhost:8080%s", apiPath))
+	return cmd.Output()
+}
+
+func (s *Server) handleInternalPools(w http.ResponseWriter, r *http.Request) {
+	pools, err := s.engine.ListPools(r.Context())
+	if err != nil {
+		httpError(w, err, http.StatusInternalServerError)
+		return
+	}
+	if pools == nil {
+		pools = []engine.PoolSummary{}
+	}
+	jsonResp(w, pools)
+}
+
 func (s *Server) handlePairNodes(w http.ResponseWriter, r *http.Request) {
 	if s.pairing == nil {
 		jsonResp(w, []engine.PairedNode{})
@@ -1773,11 +1798,54 @@ func (s *Server) handlePairNodes(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handlePairNodeDelete(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodDelete || s.pairing == nil {
+	if s.pairing == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		return
+	}
+	path := strings.TrimPrefix(r.URL.Path, "/api/pair/nodes/")
+	parts := strings.SplitN(path, "/", 2)
+	id := parts[0]
+	action := ""
+	if len(parts) > 1 {
+		action = parts[1]
+	}
+
+	if action == "pools" && r.Method == http.MethodGet {
+		node := s.pairing.FindNode(id)
+		if node == nil {
+			httpError(w, fmt.Errorf("node not found"), http.StatusNotFound)
+			return
+		}
+		out, err := s.sshQuery(r.Context(), node, "/api/internal/pools")
+		if err != nil {
+			httpError(w, err, http.StatusBadGateway)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(out)
+		return
+	}
+
+	if action == "info" && r.Method == http.MethodGet {
+		node := s.pairing.FindNode(id)
+		if node == nil {
+			httpError(w, fmt.Errorf("node not found"), http.StatusNotFound)
+			return
+		}
+		out, err := s.sshQuery(r.Context(), node, "/api/internal/node-info")
+		if err != nil {
+			httpError(w, err, http.StatusBadGateway)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(out)
+		return
+	}
+
+	if r.Method != http.MethodDelete {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
-	id := strings.TrimPrefix(r.URL.Path, "/api/pair/nodes/")
 	if err := s.pairing.RemoveNode(id); err != nil {
 		httpError(w, err, http.StatusNotFound)
 		return

@@ -224,6 +224,7 @@ func (e *engineImpl) ListPools(ctx context.Context) ([]PoolSummary, error) {
 			summaries[i].TotalCapacityBytes = usage.TotalBytes
 			summaries[i].UsedCapacityBytes = usage.UsedBytes
 		}
+		summaries[i].MountPoint = p.MountPoint
 	}
 	return summaries, nil
 }

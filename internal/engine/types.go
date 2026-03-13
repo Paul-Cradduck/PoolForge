@@ -252,6 +252,7 @@ type PoolSummary struct {
 	ID                 string
 	Name               string
 	State              PoolState
+	MountPoint         string
 	TotalCapacityBytes uint64
 	UsedCapacityBytes  uint64
 	DiskCount          int
