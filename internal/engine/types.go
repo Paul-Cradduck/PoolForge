@@ -194,12 +194,26 @@ type SyncRun struct {
 	Error        string `json:"error,omitempty"`
 }
 
+type SyncProgress struct {
+	JobID       string  `json:"job_id"`
+	Running     bool    `json:"running"`
+	CurrentFile string  `json:"current_file,omitempty"`
+	BytesDone   uint64  `json:"bytes_done"`
+	BytesTotal  uint64  `json:"bytes_total"`
+	SpeedBps    uint64  `json:"speed_bps"`
+	Percent     float64 `json:"percent"`
+	FilesTotal  int     `json:"files_total"`
+	FilesDone   int     `json:"files_done"`
+	StartedAt   int64   `json:"started_at,omitempty"`
+}
+
 type DiskInfo struct {
 	Device        string
 	CapacityBytes uint64
 	State         DiskState
 	Slices        []SliceInfo
 	FailedAt      *time.Time
+	Label         string
 }
 
 type SliceInfo struct {
@@ -266,6 +280,9 @@ type DiskStatusInfo struct {
 	State              DiskState
 	ContributingArrays []string
 	CapacityBytes      uint64
+	Label              string
+	Serial             string
+	EnclosureSlot      string
 }
 
 type RebuildProgress struct {

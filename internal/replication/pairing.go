@@ -48,6 +48,10 @@ func (pm *PairingManager) InitPairing(localName, localHost string) (string, erro
 
 // Exchange handles the key exchange from a remote node.
 func (pm *PairingManager) Exchange(code, remoteName, remoteHost, remotePubKey string) (string, error) {
+	// Strip port from host if present
+	if idx := strings.LastIndex(remoteHost, ":"); idx > 0 {
+		remoteHost = remoteHost[:idx]
+	}
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
@@ -86,6 +90,9 @@ func (pm *PairingManager) Exchange(code, remoteName, remoteHost, remotePubKey st
 
 // CompletePairing is called by the joining node to store the remote node after exchange.
 func (pm *PairingManager) CompletePairing(remoteName, remoteHost, remotePubKey string) {
+	if idx := strings.LastIndex(remoteHost, ":"); idx > 0 {
+		remoteHost = remoteHost[:idx]
+	}
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 	AuthorizeKey(remotePubKey)

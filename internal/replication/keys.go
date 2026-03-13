@@ -34,9 +34,12 @@ func PrivateKeyPath() string {
 	return filepath.Join(keyDir, "id_ed25519")
 }
 
-// AuthorizeKey adds a public key to the authorized_keys file.
+// AuthorizeKey adds a public key to root's authorized_keys file.
 func AuthorizeKey(pubKey string) error {
-	authFile := filepath.Join(keyDir, "authorized_keys")
+	// Add to root's authorized_keys for rsync access
+	rootSSH := "/root/.ssh"
+	os.MkdirAll(rootSSH, 0700)
+	authFile := filepath.Join(rootSSH, "authorized_keys")
 	existing, _ := os.ReadFile(authFile)
 	if strings.Contains(string(existing), pubKey) {
 		return nil
@@ -50,9 +53,9 @@ func AuthorizeKey(pubKey string) error {
 	return err
 }
 
-// RemoveKey removes a public key from authorized_keys.
+// RemoveKey removes a public key from root's authorized_keys.
 func RemoveKey(pubKey string) error {
-	authFile := filepath.Join(keyDir, "authorized_keys")
+	authFile := "/root/.ssh/authorized_keys"
 	data, err := os.ReadFile(authFile)
 	if err != nil {
 		return nil

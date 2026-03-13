@@ -19,7 +19,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var Version = "0.18"
+var Version = "0.28"
 
 func main() {
 	meta := metadata.NewJSONStore("")
@@ -671,7 +671,13 @@ func main() {
 			pairingMgr := replication.NewPairingManager()
 			syncMgr := replication.NewSyncManager(pairingMgr)
 
-			srv := api.NewWithAuth(eng, serveUser, servePass)
+			if serveUser == "" {
+			serveUser = "admin"
+		}
+		if servePass == "" {
+			servePass = "admin"
+		}
+		srv := api.NewWithAuth(eng, serveUser, servePass)
 			srv.SetAlerter(daemon.Alerter())
 			srv.SetLogs(daemon.Logs())
 			srv.SetDaemon(daemon)

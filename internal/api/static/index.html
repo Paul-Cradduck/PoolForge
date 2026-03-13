@@ -175,16 +175,19 @@ tbody tr:nth-child(even) td { background: rgba(134,134,134,0.045); }
 
 <div class="app-layout">
 <nav class="sidebar">
-  <div class="sidebar-header"><div class="logo">P</div><h1>PoolForge</h1><span id="versionBadge" style="font-size:0.65rem;color:var(--muted);margin-left:auto"></span></div>
+  <div class="sidebar-header"><div class="logo">P</div><div><h1 id="nodeNameHeader">PoolForge</h1></div><span id="versionBadge" style="font-size:0.65rem;color:var(--muted);margin-left:auto"></span></div>
   <ul class="sidebar-nav">
     <li class="nav-item active" onclick="navigate('dashboard')"><span class="icon">📊</span> Dashboard</li>
-    <li class="nav-item" onclick="navigate('disks')"><span class="icon">💾</span> Disks</li>
+    <li class="nav-item" onclick="navigate('disks')"><span class="icon">💿</span> Disks</li>
     <li class="nav-item" onclick="navigate('files')"><span class="icon">📂</span> Files</li>
     <li class="nav-item" onclick="navigate('shares')"><span class="icon">📁</span> Shares</li>
+    <li class="nav-item" onclick="navigate('smb')"><span class="icon">🪟</span> SMB</li>
+    <li class="nav-item" onclick="navigate('nfs')"><span class="icon">🐧</span> NFS</li>
     <li class="nav-item" onclick="navigate('snapshots')"><span class="icon">📸</span> Snapshots</li>
     <li class="nav-item" onclick="navigate('replication')"><span class="icon">🔄</span> Replication</li>
     <li class="nav-item" onclick="navigate('monitoring')"><span class="icon">📈</span> Monitoring</li>
     <li class="nav-item" onclick="navigate('safety')"><span class="icon">🛡️</span> Safety</li>
+    <li class="nav-item" onclick="navigate('logs')"><span class="icon">📋</span> Logs</li>
     <li class="nav-item" onclick="navigate('settings')"><span class="icon">⚙️</span> Settings</li>
   </ul>
 </nav>
@@ -216,6 +219,73 @@ tbody tr:nth-child(even) td { background: rgba(134,134,134,0.045); }
     <div id="shares"></div>
     <div id="users"></div>
   </div>
+  <!-- SMB page -->
+  <div id="page-smb" class="page">
+    <div class="card">
+      <h2>🪟 SMB / Samba Configuration</h2>
+      <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1rem">
+        <label style="display:flex;align-items:center;gap:6px;font-size:0.9rem;cursor:pointer;color:var(--text)">
+          <input type="checkbox" id="smbEnabled" onchange="toggleProtocol('smb', this.checked)"> Service Enabled
+        </label>
+        <span id="smbStatus" style="font-size:12px"></span>
+      </div>
+      <div style="display:grid;grid-template-columns:auto 1fr;gap:0.5rem 1rem;align-items:center;max-width:500px">
+        <label style="font-size:13px;color:var(--muted)">Workgroup</label>
+        <input id="smbWorkgroup" placeholder="WORKGROUP" style="font-size:13px">
+        <label style="font-size:13px;color:var(--muted)">Server Name</label>
+        <input id="smbServerName" placeholder="PoolForge NAS" style="font-size:13px">
+        <label style="font-size:13px;color:var(--muted)">Min Protocol</label>
+        <select id="smbMinProtocol" style="font-size:13px">
+          <option value="">Default</option>
+          <option value="SMB2">SMB2</option>
+          <option value="SMB3">SMB3</option>
+        </select>
+        <label style="font-size:13px;color:var(--muted)">Max Connections</label>
+        <input id="smbMaxConn" type="number" placeholder="0 (unlimited)" style="font-size:13px">
+      </div>
+      <button class="primary" onclick="saveSMBConfig()" style="margin-top:1rem">Save SMB Settings</button>
+    </div>
+    <div class="card">
+      <h2>📋 SMB Config Preview</h2>
+      <pre id="smbPreview" style="font-size:11px;color:var(--muted);white-space:pre-wrap;max-height:200px;overflow:auto"></pre>
+    </div>
+  </div>
+  <!-- NFS page -->
+  <div id="page-nfs" class="page">
+    <div class="card">
+      <h2>🐧 NFS Configuration</h2>
+      <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1rem">
+        <label style="display:flex;align-items:center;gap:6px;font-size:0.9rem;cursor:pointer;color:var(--text)">
+          <input type="checkbox" id="nfsEnabled" onchange="toggleProtocol('nfs', this.checked)"> Service Enabled
+        </label>
+        <span id="nfsStatus" style="font-size:12px"></span>
+      </div>
+      <div style="display:grid;grid-template-columns:auto 1fr;gap:0.5rem 1rem;align-items:center;max-width:500px">
+        <label style="font-size:13px;color:var(--muted)">NFS Version</label>
+        <select id="nfsVersion" style="font-size:13px">
+          <option value="">Default (v4)</option>
+          <option value="3">NFSv3</option>
+          <option value="4">NFSv4</option>
+          <option value="4.1">NFSv4.1</option>
+          <option value="4.2">NFSv4.2</option>
+        </select>
+        <label style="font-size:13px;color:var(--muted)">Threads (nfsd)</label>
+        <input id="nfsThreads" type="number" placeholder="8" style="font-size:13px">
+        <label style="font-size:13px;color:var(--muted)">Default Clients</label>
+        <input id="nfsDefaultClients" placeholder="* (all)" style="font-size:13px">
+        <label style="font-size:13px;color:var(--muted)">Root Squash</label>
+        <select id="nfsRootSquash" style="font-size:13px">
+          <option value="yes">Enabled (root_squash)</option>
+          <option value="no">Disabled (no_root_squash)</option>
+        </select>
+      </div>
+      <button class="primary" onclick="saveNFSConfig()" style="margin-top:1rem">Save NFS Settings</button>
+    </div>
+    <div class="card">
+      <h2>📋 NFS Exports Preview</h2>
+      <pre id="nfsPreview" style="font-size:11px;color:var(--muted);white-space:pre-wrap;max-height:200px;overflow:auto"></pre>
+    </div>
+  </div>
   <!-- Snapshots page -->
   <div id="page-snapshots" class="page">
     <div id="snapshotsPage"></div>
@@ -223,18 +293,38 @@ tbody tr:nth-child(even) td { background: rgba(134,134,134,0.045); }
   <!-- Replication page -->
   <div id="page-replication" class="page">
     <div class="card">
-      <h2>🔗 Paired Nodes <span style="flex:1"></span><button onclick="pairInit()">+ Pair New Node</button></h2>
+      <h2>🔗 Paired Nodes <span style="flex:1"></span><button onclick="pairInit()">+ Generate Code</button> <button onclick="showJoinPair()">+ Join Node</button></h2>
       <table id="pairedNodesTable"><tr><th>Name</th><th>Host</th><th>Paired</th><th></th></tr></table>
       <div id="noPairedNodes" style="text-align:center;padding:16px;color:var(--muted);font-size:13px">No paired nodes</div>
       <div id="pairingCode" style="display:none;margin-top:12px;padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:8px">
         <div style="font-size:13px;color:var(--muted)">Pairing code (expires in 10 minutes):</div>
         <div id="pairingCodeValue" style="font-size:24px;font-weight:700;font-family:monospace;margin:8px 0"></div>
-        <div style="font-size:12px;color:var(--muted)">Run on remote node: <code>poolforge pair join --code &lt;code&gt;</code></div>
+        <div style="font-size:12px;color:var(--muted)">Enter this code on the remote node's Replication page → Join Node</div>
+      </div>
+      <div id="joinPairForm" style="display:none;margin-top:12px;padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:8px">
+        <div style="font-size:13px;color:var(--muted);margin-bottom:8px">Enter the pairing code from the remote node:</div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input id="joinPairCode" placeholder="123456@10.0.48.81:8080" style="font-size:14px;font-family:monospace;flex:1">
+          <button class="primary" onclick="joinPair()">Join</button>
+        </div>
       </div>
     </div>
     <div class="card">
       <h2>📋 Sync Jobs <span style="flex:1"></span><button onclick="showSyncJobModal()">+ Create Job</button></h2>
       <table id="syncJobsTable"><tr><th>Name</th><th>Remote</th><th>Mode</th><th>Schedule</th><th>Last Run</th><th></th></tr></table>
+      <div id="syncProgressBar" style="display:none;margin-top:10px;padding:10px;background:var(--card);border:1px solid var(--border);border-radius:6px">
+        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+          <span id="syncProgLabel">Syncing...</span>
+          <span id="syncProgSpeed"></span>
+        </div>
+        <div style="background:var(--bg);border-radius:4px;height:18px;overflow:hidden">
+          <div id="syncProgFill" style="height:100%;background:var(--accent);border-radius:4px;transition:width 0.3s;width:0%"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-top:4px">
+          <span id="syncProgBytes"></span>
+          <span id="syncProgFiles"></span>
+        </div>
+      </div>
       <div id="noSyncJobs" style="text-align:center;padding:16px;color:var(--muted);font-size:13px">No sync jobs</div>
     </div>
     <div class="card">
@@ -296,10 +386,29 @@ tbody tr:nth-child(even) td { background: rgba(134,134,134,0.045); }
   <div id="page-safety" class="page">
     <div id="safety"></div>
     <div id="alerts"></div>
+  </div>
+  <div id="page-logs" class="page">
     <div id="logs"></div>
   </div>
   <!-- Settings page -->
   <div id="page-settings" class="page">
+    <div class="card">
+      <h2>🔐 Admin Access</h2>
+      <div style="display:grid;grid-template-columns:auto 1fr;gap:0.5rem 1rem;align-items:center;max-width:400px">
+        <label style="font-size:13px;color:var(--muted)">Node Name</label>
+        <input id="nodeName" placeholder="My NAS" style="font-size:13px">
+        <label style="font-size:13px;color:var(--muted)">Username</label>
+        <input id="adminUser" style="font-size:13px">
+        <label style="font-size:13px;color:var(--muted)">New Password</label>
+        <input id="adminPass" type="password" placeholder="Leave blank to keep current" style="font-size:13px">
+        <label style="font-size:13px;color:var(--muted)">Confirm Password</label>
+        <input id="adminPassConfirm" type="password" placeholder="Confirm new password" style="font-size:13px">
+        <label style="font-size:13px;color:var(--muted)">Listen Port</label>
+        <input id="adminPort" placeholder="8080" style="font-size:13px">
+      </div>
+      <button class="primary" onclick="saveAdminSettings()" style="margin-top:1rem">Save & Restart</button>
+      <div style="font-size:11px;color:var(--muted);margin-top:0.5rem">Changes require a service restart to take effect.</div>
+    </div>
     <div class="card">
       <h2>⚙️ Pool Settings</h2>
       <div id="settingsPoolList"></div>
@@ -410,6 +519,8 @@ tbody tr:nth-child(even) td { background: rgba(134,134,134,0.045); }
     <select id="syncJobRemote"></select>
     <label>Local Pool</label>
     <select id="syncJobLocalPool"></select>
+    <label>Remote Pool Mount Path</label>
+    <input id="syncJobRemotePool" placeholder="/mnt/poolforge/replicapool">
     <label>Mode</label>
     <select id="syncJobMode"><option value="push">Push</option><option value="pull">Pull</option><option value="bidirectional">Bidirectional</option></select>
     <label>Schedule (e.g. 15m, 1h, empty for manual)</label>
@@ -429,8 +540,8 @@ let availableDisks = [];
 let currentPage = 'dashboard';
 
 const pageTitles = {
-  dashboard: 'Dashboard', disks: 'Disks', files: 'Files', shares: 'Shares', snapshots: 'Snapshots',
-  replication: 'Replication', monitoring: 'Monitoring', safety: 'Safety', settings: 'Settings'
+  dashboard: 'Dashboard', disks: 'Disks', files: 'Files', shares: 'Shares', smb: 'SMB', nfs: 'NFS', snapshots: 'Snapshots',
+  replication: 'Replication', monitoring: 'Monitoring', safety: 'Safety', logs: 'Logs', settings: 'Settings'
 };
 
 function navigate(page) {
@@ -446,11 +557,14 @@ function navigate(page) {
   if (page === 'disks') refreshDisksPage();
   if (page === 'files') refreshFilesPage();
   if (page === 'shares') { refreshShares(); refreshUsers(); }
+  if (page === 'smb') refreshSMBPage();
+  if (page === 'nfs') refreshNFSPage();
   if (page === 'snapshots') refreshSnapshotsPage();
   if (page === 'replication') refreshSync();
   if (page === 'monitoring') { startMonitoringSSE(); refreshClients(); refreshProtocolStatus(); }
   else stopMonitoringSSE();
-  if (page === 'safety') { refreshSafety(); refreshAlerts(); refreshLogs(); }
+  if (page === 'safety') { refreshSafety(); refreshAlerts(); }
+  if (page === 'logs') refreshLogs();
   if (page === 'settings') refreshSettings();
 }
 
@@ -466,6 +580,8 @@ function toast(msg, isError) {
   t.textContent = msg;
   t.className = 'toast show' + (isError ? ' error' : '');
   setTimeout(() => t.className = 'toast', 3000);
+  fetch(API + '/logs', { method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({level: isError ? 'error' : 'info', message: '[UI] ' + msg}) }).catch(()=>{});
 }
 
 function badge(state) {
@@ -1064,6 +1180,26 @@ async function refreshSafety() {
 }
 
 // --- Disks Page ---
+// --- Disk Identification ---
+async function setDiskLabel(device) {
+  const label = prompt('Enter label for ' + device + ' (e.g. "Bay 1 - Left", "Top Slot"):');
+  if (label === null) return;
+  try {
+    await api('/disks/label', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({device, label})});
+    toast('Label set for ' + device);
+    refreshDisksPage();
+  } catch(e) { toast(e.message, true); }
+}
+async function locateDisk(device, btn) {
+  const on = !btn.classList.contains('locating');
+  try {
+    await api('/disks/locate', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({device, on})});
+    btn.classList.toggle('locating', on);
+    btn.style.background = on ? 'var(--yellow)' : '';
+    toast(on ? 'Blinking LED on ' + device : 'LED off for ' + device);
+  } catch(e) { toast(e.message, true); }
+}
+
 async function refreshDisksPage() {
   try {
     const disks = await api('/disks');
@@ -1072,10 +1208,15 @@ async function refreshDisksPage() {
       el.innerHTML = '<div class="empty">No disks detected.</div>';
       return;
     }
-    let html = '<div class="card"><h2>💾 All Disks</h2><table><tr><th>Device</th><th>Size</th><th>Status</th><th>Pool</th></tr>';
+    let html = '<div class="card"><h2>💿 All Disks</h2><table><tr><th>Device</th><th>Label</th><th>Size</th><th>Serial</th><th>Slot</th><th>Status</th><th>Pool</th><th></th></tr>';
     for (const d of disks) {
       const status = d.inUse ? `<span class="badge healthy">in use</span>` : `<span class="badge" style="background:rgba(130,229,80,0.08);color:var(--green);border-color:rgba(130,229,80,0.2)">available</span>`;
-      html += `<tr><td>${d.device}</td><td>${d.sizeGB.toFixed(1)} GB</td><td>${status}</td><td>${d.pool || '—'}</td></tr>`;
+      const label = d.label || '<span style="color:var(--muted)">—</span>';
+      html += `<tr><td>${d.device}</td><td>${label}</td><td>${d.sizeGB.toFixed(1)} GB</td><td style="font-size:11px;color:var(--muted)">${d.serial || '—'}</td><td>${d.slot || '—'}</td><td>${status}</td><td>${d.pool || '—'}</td>
+        <td style="white-space:nowrap">
+          <button onclick="setDiskLabel('${d.device}')" style="font-size:10px;padding:2px 6px" title="Set label">🏷️</button>
+          <button onclick="locateDisk('${d.device}',this)" style="font-size:10px;padding:2px 6px" title="Blink LED">💡</button>
+        </td></tr>`;
     }
     html += '</table></div>';
 
@@ -1085,9 +1226,9 @@ async function refreshDisksPage() {
       const st = await api('/pools/' + p.ID);
       const ds = st.DiskStatuses || [];
       if (ds.length === 0) continue;
-      html += `<div class="card"><h2>${p.Name} — Disk Detail</h2><table><tr><th>Device</th><th>Size</th><th>State</th><th>Arrays</th></tr>`;
+      html += `<div class="card"><h2>${p.Name} — Disk Detail</h2><table><tr><th>Device</th><th>Label</th><th>Size</th><th>Serial</th><th>Slot</th><th>State</th><th>Arrays</th></tr>`;
       for (const d of ds) {
-        html += `<tr><td>${d.Device}</td><td>${fmtBytes(d.CapacityBytes)}</td><td>${badge(d.State)}</td><td style="font-size:0.75rem;color:var(--muted)">${(d.ContributingArrays||[]).join(', ')}</td></tr>`;
+        html += `<tr><td>${d.Device}</td><td>${d.Label || '<span style="color:var(--muted)">—</span>'}</td><td>${fmtBytes(d.CapacityBytes)}</td><td style="font-size:11px;color:var(--muted)">${d.Serial || '—'}</td><td>${d.EnclosureSlot || '—'}</td><td>${badge(d.State)}</td><td style="font-size:0.75rem;color:var(--muted)">${(d.ContributingArrays||[]).join(', ')}</td></tr>`;
       }
       html += '</table></div>';
     }
@@ -1318,6 +1459,58 @@ async function restoreFileFromSnap(poolID, snapName, filePath) {
   } catch(e) { toast(e.message, true); }
 }
 
+// --- SMB Page ---
+async function refreshSMBPage() {
+  try {
+    const cfg = await api('/protocols/config');
+    document.getElementById('smbEnabled').checked = cfg.smb_running;
+    document.getElementById('smbStatus').innerHTML = cfg.smb_running ? '<span style="color:var(--green)">● Running</span>' : '<span style="color:var(--red)">● Stopped</span>';
+    document.getElementById('smbWorkgroup').value = cfg.smb_workgroup || '';
+    document.getElementById('smbServerName').value = cfg.smb_server_name || '';
+    document.getElementById('smbMinProtocol').value = cfg.smb_min_protocol || '';
+    document.getElementById('smbMaxConn').value = cfg.smb_max_connections || '';
+    document.getElementById('smbPreview').textContent = cfg.smb_config_preview || '';
+  } catch(e) { toast(e.message, true); }
+}
+async function saveSMBConfig() {
+  try {
+    await api('/protocols/config', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
+      smb_workgroup: document.getElementById('smbWorkgroup').value,
+      smb_server_name: document.getElementById('smbServerName').value,
+      smb_min_protocol: document.getElementById('smbMinProtocol').value,
+      smb_max_connections: parseInt(document.getElementById('smbMaxConn').value) || 0
+    })});
+    toast('SMB settings saved');
+    refreshSMBPage();
+  } catch(e) { toast(e.message, true); }
+}
+
+// --- NFS Page ---
+async function refreshNFSPage() {
+  try {
+    const cfg = await api('/protocols/config');
+    document.getElementById('nfsEnabled').checked = cfg.nfs_running;
+    document.getElementById('nfsStatus').innerHTML = cfg.nfs_running ? '<span style="color:var(--green)">● Running</span>' : '<span style="color:var(--red)">● Stopped</span>';
+    document.getElementById('nfsVersion').value = cfg.nfs_version || '';
+    document.getElementById('nfsThreads').value = cfg.nfs_threads || '';
+    document.getElementById('nfsDefaultClients').value = cfg.nfs_default_clients || '';
+    document.getElementById('nfsRootSquash').value = cfg.nfs_root_squash ? 'yes' : 'no';
+    document.getElementById('nfsPreview').textContent = cfg.nfs_exports_preview || '';
+  } catch(e) { toast(e.message, true); }
+}
+async function saveNFSConfig() {
+  try {
+    await api('/protocols/config', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
+      nfs_version: document.getElementById('nfsVersion').value,
+      nfs_threads: parseInt(document.getElementById('nfsThreads').value) || 0,
+      nfs_default_clients: document.getElementById('nfsDefaultClients').value,
+      nfs_root_squash: document.getElementById('nfsRootSquash').value === 'yes'
+    })});
+    toast('NFS settings saved');
+    refreshNFSPage();
+  } catch(e) { toast(e.message, true); }
+}
+
 // --- Protocol Toggles ---
 async function toggleProtocol(proto, enabled) {
   try {
@@ -1328,8 +1521,44 @@ async function toggleProtocol(proto, enabled) {
 }
 
 // --- Settings Page ---
+async function saveAdminSettings() {
+  const pass = document.getElementById('adminPass').value;
+  const passConfirm = document.getElementById('adminPassConfirm').value;
+  if (pass && pass !== passConfirm) { toast('Passwords do not match', true); return; }
+  const port = document.getElementById('adminPort').value;
+  try {
+    const r = await api('/admin/settings', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
+      username: document.getElementById('adminUser').value,
+      new_password: pass,
+      port: port,
+      node_name: document.getElementById('nodeName').value.trim()
+    })});
+    toast(r.status);
+    document.getElementById('adminPass').value = '';
+    document.getElementById('adminPassConfirm').value = '';
+    // Restart service
+    if (confirm('Settings saved. Restart service now for changes to take effect?')) {
+      try { await api('/admin/restart', {method:'POST'}); } catch(e) {}
+      toast('Service restarting...');
+      setTimeout(() => {
+        const newPort = port || location.port;
+        const newHost = location.hostname + ':' + newPort;
+        location.href = location.protocol + '//' + newHost;
+      }, 3000);
+    }
+  } catch(e) { toast(e.message, true); }
+}
+
 async function refreshSettings() {
   refreshProtocolStatus();
+  // Load admin settings
+  try {
+    const admin = await api('/admin/settings');
+    document.getElementById('adminUser').value = admin.username || '';
+    document.getElementById('nodeName').value = admin.node_name || '';
+    const addr = admin.port || '0.0.0.0:8080';
+    document.getElementById('adminPort').value = addr.includes(':') ? addr.split(':')[1] : addr;
+  } catch(e) {}
   try {
     const pools = await api('/pools');
     const listEl = document.getElementById('settingsPoolList');
@@ -1369,6 +1598,7 @@ async function refreshSettings() {
 
 // Initial load
 api('/version').then(r => { document.getElementById('versionBadge').textContent = 'v' + r.version; }).catch(()=>{});
+api('/admin/settings').then(r => { if (r.node_name) document.getElementById('nodeNameHeader').textContent = r.node_name; }).catch(()=>{});
 refresh();
 refreshAlerts();
 refreshLogs();
@@ -1816,11 +2046,33 @@ async function refreshPairedNodes() {
 
 async function pairInit() {
   try {
+    const admin = await api('/admin/settings');
+    const nodeName = admin.node_name || (window.location.hostname + ':' + window.location.port);
     const host = window.location.hostname + ':' + window.location.port;
     const r = await api('/pair/init', { method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({name: host, host: host}) });
+      body: JSON.stringify({name: nodeName, host: host}) });
     document.getElementById('pairingCodeValue').textContent = r.code;
     document.getElementById('pairingCode').style.display = '';
+    document.getElementById('joinPairForm').style.display = 'none';
+  } catch(e) { toast(e.message, true); }
+}
+
+function showJoinPair() {
+  document.getElementById('joinPairForm').style.display = '';
+  document.getElementById('pairingCode').style.display = 'none';
+  document.getElementById('joinPairCode').focus();
+}
+
+async function joinPair() {
+  const code = document.getElementById('joinPairCode').value.trim();
+  if (!code) { toast('Enter a pairing code', true); return; }
+  try {
+    await api('/pair/join', { method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({code}) });
+    toast('Node paired successfully');
+    document.getElementById('joinPairForm').style.display = 'none';
+    document.getElementById('joinPairCode').value = '';
+    refreshPairedNodes();
   } catch(e) { toast(e.message, true); }
 }
 
@@ -1906,10 +2158,12 @@ async function submitSyncJob() {
     name: document.getElementById('syncJobName').value.trim(),
     remote_node: document.getElementById('syncJobRemote').value,
     local_pool: document.getElementById('syncJobLocalPool').value,
+    remote_pool: document.getElementById('syncJobRemotePool').value.trim(),
     mode: document.getElementById('syncJobMode').value,
     schedule: document.getElementById('syncJobSchedule').value.trim(),
   };
   if (!job.name) return toast('Enter a job name', true);
+  if (!job.remote_pool) return toast('Enter the remote pool mount path', true);
   try {
     await api('/sync/jobs', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(job) });
     toast('Sync job created');
@@ -1918,12 +2172,39 @@ async function submitSyncJob() {
   } catch(e) { toast(e.message, true); }
 }
 
+let syncPollTimer = null;
 async function runSyncJob(id) {
+  toast('Sync starting...');
   try {
     const r = await api('/sync/jobs/' + id + '/run', { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' });
-    toast(r.status === 'success' ? 'Sync completed' : 'Sync failed: ' + (r.error||''), r.status !== 'success');
-    refreshSync();
+    if (r.status === 'failed') { toast('Sync failed: ' + (r.error||'unknown'), true); return; }
+    // Start polling progress
+    document.getElementById('syncProgressBar').style.display = '';
+    if (syncPollTimer) clearInterval(syncPollTimer);
+    syncPollTimer = setInterval(() => pollSyncProgress(id), 1000);
   } catch(e) { toast(e.message, true); }
+}
+
+async function pollSyncProgress(id) {
+  try {
+    const p = await api('/sync/jobs/' + id + '/progress');
+    const fill = document.getElementById('syncProgFill');
+    const label = document.getElementById('syncProgLabel');
+    const speed = document.getElementById('syncProgSpeed');
+    const bytes = document.getElementById('syncProgBytes');
+    const files = document.getElementById('syncProgFiles');
+    fill.style.width = (p.percent||0) + '%';
+    label.textContent = p.running ? 'Syncing... ' + Math.round(p.percent||0) + '%' : 'Sync complete';
+    speed.textContent = p.running ? fmtBytes(p.speed_bps||0) + '/s' : '';
+    bytes.textContent = fmtBytes(p.bytes_done||0) + (p.bytes_total ? ' / ' + fmtBytes(p.bytes_total) : '');
+    files.textContent = (p.files_done||0) + (p.files_total ? ' / ' + p.files_total + ' files' : ' files');
+    if (!p.running) {
+      clearInterval(syncPollTimer);
+      syncPollTimer = null;
+      setTimeout(() => { document.getElementById('syncProgressBar').style.display = 'none'; refreshSync(); }, 3000);
+      toast('Sync complete — ' + (p.files_done||0) + ' files, ' + fmtBytes(p.bytes_done||0));
+    }
+  } catch(e) {}
 }
 
 async function deleteSyncJob(id) {

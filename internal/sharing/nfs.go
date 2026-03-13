@@ -16,18 +16,25 @@ const (
 type NFSBackend struct{}
 
 func (b *NFSBackend) WriteExports(shares []Share) error {
+	defaultClients := readConfValue("POOLFORGE_NFS_DEFAULT_CLIENTS", "*")
+	rootSquash := readConfValue("POOLFORGE_NFS_ROOT_SQUASH", "yes")
+
 	var block strings.Builder
 	block.WriteString(beginMarker + "\n")
 	for _, s := range shares {
 		clients := s.NFSClients
 		if clients == "" {
-			clients = "*"
+			clients = defaultClients
 		}
 		opts := "rw"
 		if s.ReadOnly {
 			opts = "ro"
 		}
-		fmt.Fprintf(&block, "%s %s(%s,sync,no_subtree_check)\n", s.Path, clients, opts)
+		opts += ",sync,no_subtree_check"
+		if rootSquash == "no" {
+			opts += ",no_root_squash"
+		}
+		fmt.Fprintf(&block, "%s %s(%s)\n", s.Path, clients, opts)
 	}
 	block.WriteString(endMarker + "\n")
 

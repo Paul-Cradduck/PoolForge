@@ -63,6 +63,7 @@ type diskRecord struct {
 	State         string        `json:"state"`
 	Slices        []sliceRecord `json:"slices"`
 	FailedAt      *time.Time    `json:"failed_at,omitempty"`
+	Label         string        `json:"label,omitempty"`
 }
 
 type sliceRecord struct {
@@ -198,7 +199,7 @@ func toRecord(p *engine.Pool) *poolRecord {
 		LastShutdown: p.LastShutdown, LastStartup: p.LastStartup,
 	}
 	for _, d := range p.Disks {
-		dr := diskRecord{Device: d.Device, CapacityBytes: d.CapacityBytes, State: string(d.State), FailedAt: d.FailedAt}
+		dr := diskRecord{Device: d.Device, CapacityBytes: d.CapacityBytes, State: string(d.State), FailedAt: d.FailedAt, Label: d.Label}
 		for _, sl := range d.Slices {
 			dr.Slices = append(dr.Slices, sliceRecord{
 				TierIndex: sl.TierIndex, PartitionNumber: sl.PartitionNumber,
@@ -247,7 +248,7 @@ func fromRecord(rec *poolRecord) *engine.Pool {
 		LastShutdown: rec.LastShutdown, LastStartup: rec.LastStartup,
 	}
 	for _, dr := range rec.Disks {
-		d := engine.DiskInfo{Device: dr.Device, CapacityBytes: dr.CapacityBytes, State: engine.DiskState(dr.State), FailedAt: dr.FailedAt}
+		d := engine.DiskInfo{Device: dr.Device, CapacityBytes: dr.CapacityBytes, State: engine.DiskState(dr.State), FailedAt: dr.FailedAt, Label: dr.Label}
 		for _, sr := range dr.Slices {
 			d.Slices = append(d.Slices, engine.SliceInfo{
 				TierIndex: sr.TierIndex, PartitionNumber: sr.PartitionNumber,

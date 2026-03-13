@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/poolforge/poolforge/internal/sharing"
@@ -291,7 +293,8 @@ func (e *engineImpl) GetPoolStatus(ctx context.Context, poolID string) (*PoolSta
 		}
 		status.DiskStatuses = append(status.DiskStatuses, DiskStatusInfo{
 			Device: d.Device, State: d.State, ContributingArrays: contributing,
-			CapacityBytes: d.CapacityBytes,
+			CapacityBytes: d.CapacityBytes, Label: d.Label,
+			Serial: getDiskSerial(d.Device), EnclosureSlot: getEnclosureSlot(d.Device),
 		})
 	}
 	if usage, err := e.fs.GetUsage(pool.MountPoint); err == nil {
@@ -300,6 +303,61 @@ func (e *engineImpl) GetPoolStatus(ctx context.Context, poolID string) (*PoolSta
 		status.FreeCapacityBytes = usage.TotalBytes - usage.UsedBytes
 	}
 	return status, nil
+}
+
+func (e *engineImpl) SetDiskLabel(ctx context.Context, device string, label string) error {
+	pools, err := e.meta.ListPools()
+	if err != nil {
+		return err
+	}
+	for _, ps := range pools {
+		p, err := e.meta.LoadPool(ps.ID)
+		if err != nil {
+			continue
+		}
+		for i, d := range p.Disks {
+			if d.Device == device {
+				p.Disks[i].Label = label
+				return e.meta.SavePool(p)
+			}
+		}
+	}
+	return fmt.Errorf("device %s not found in any pool", device)
+}
+
+func getDiskSerial(device string) string {
+	name := strings.TrimPrefix(device, "/dev/")
+	// Try sysfs first
+	if data, err := os.ReadFile("/sys/block/" + name + "/device/serial"); err == nil {
+		return strings.TrimSpace(string(data))
+	}
+	// Fallback to smartctl
+	out, err := exec.Command("smartctl", "-i", device).Output()
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.HasPrefix(line, "Serial Number:") || strings.HasPrefix(line, "Serial number:") {
+			return strings.TrimSpace(strings.SplitN(line, ":", 2)[1])
+		}
+	}
+	return ""
+}
+
+func getEnclosureSlot(device string) string {
+	name := strings.TrimPrefix(device, "/dev/")
+	entries, err := filepath.Glob("/sys/class/enclosure/*/*/device/block/" + name)
+	if err != nil || len(entries) == 0 {
+		return ""
+	}
+	// Path: /sys/class/enclosure/0:0:0:0/Slot 03/device/block/sdb
+	parts := strings.Split(entries[0], "/")
+	for _, p := range parts {
+		if strings.HasPrefix(p, "Slot") || strings.HasPrefix(p, "slot") {
+			return p
+		}
+	}
+	return ""
 }
 
 func generateID() string {

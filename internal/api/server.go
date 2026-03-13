@@ -58,7 +58,7 @@ func NewWithAuth(eng engine.EngineService, user, pass string) *Server {
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if s.user != "" {
+	if s.user != "" && r.URL.Path != "/api/pair/exchange" {
 		u, p, ok := r.BasicAuth()
 		if !ok || u != s.user || p != s.pass {
 			w.Header().Set("WWW-Authenticate", `Basic realm="PoolForge"`)
@@ -73,6 +73,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/pools", s.handlePools)
 	s.mux.HandleFunc("/api/pools/", s.handlePool)
 	s.mux.HandleFunc("/api/disks", s.handleDisks)
+	s.mux.HandleFunc("/api/disks/label", s.handleDiskLabel)
+	s.mux.HandleFunc("/api/disks/locate", s.handleDiskLocate)
 	s.mux.HandleFunc("/api/preview-add", s.handlePreviewAdd)
 	s.mux.HandleFunc("/api/preview-create", s.handlePreviewCreate)
 	s.mux.HandleFunc("/api/preview-remove", s.handlePreviewRemove)
@@ -87,8 +89,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/monitoring/clients", s.handleMonitoringClients)
 	s.mux.HandleFunc("/api/monitoring/status", s.handleProtocolStatus)
 	s.mux.HandleFunc("/api/protocols/toggle", s.handleProtocolToggle)
+	s.mux.HandleFunc("/api/protocols/config", s.handleProtocolConfig)
+	s.mux.HandleFunc("/api/admin/settings", s.handleAdminSettings)
+	s.mux.HandleFunc("/api/admin/restart", s.handleAdminRestart)
 	s.mux.HandleFunc("/api/pair/init", s.handlePairInit)
 	s.mux.HandleFunc("/api/pair/exchange", s.handlePairExchange)
+	s.mux.HandleFunc("/api/pair/join", s.handlePairJoin)
 	s.mux.HandleFunc("/api/pair/nodes", s.handlePairNodes)
 	s.mux.HandleFunc("/api/pair/nodes/", s.handlePairNodeDelete)
 	s.mux.HandleFunc("/api/sync/jobs", s.handleSyncJobs)
@@ -375,15 +381,20 @@ func (s *Server) handleDisks(w http.ResponseWriter, r *http.Request) {
 		SizeGB float64 `json:"sizeGB"`
 		InUse  bool   `json:"inUse"`
 		Pool   string `json:"pool,omitempty"`
+		Serial string `json:"serial,omitempty"`
+		Slot   string `json:"slot,omitempty"`
+		Label  string `json:"label,omitempty"`
 	}
 
-	// Build set of in-use devices
+	// Build set of in-use devices + labels/serial/slot
 	used := map[string]string{}
+	diskMeta := map[string]engine.DiskStatusInfo{}
 	if pools, err := s.engine.ListPools(r.Context()); err == nil {
 		for _, p := range pools {
 			if status, err := s.engine.GetPoolStatus(r.Context(), p.ID); err == nil {
 				for _, d := range status.DiskStatuses {
 					used[d.Device] = p.Name
+					diskMeta[d.Device] = d
 				}
 			}
 		}
@@ -409,14 +420,64 @@ func (s *Server) handleDisks(w http.ResponseWriter, r *http.Request) {
 		dev := "/dev/" + name
 		sizeBytes := readSysBlockSize(name)
 		poolName := used[dev]
+		dm := diskMeta[dev]
 		devs = append(devs, blockDev{
 			Device: dev,
 			SizeGB: float64(sizeBytes) / (1024 * 1024 * 1024),
 			InUse:  poolName != "",
 			Pool:   poolName,
+			Serial: dm.Serial,
+			Slot:   dm.EnclosureSlot,
+			Label:  dm.Label,
 		})
 	}
 	jsonResp(w, devs)
+}
+
+func (s *Server) handleDiskLabel(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		Device string `json:"device"`
+		Label  string `json:"label"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpError(w, err, http.StatusBadRequest)
+		return
+	}
+	if err := s.engine.SetDiskLabel(r.Context(), req.Device, req.Label); err != nil {
+		httpError(w, err, http.StatusInternalServerError)
+		return
+	}
+	jsonResp(w, map[string]bool{"ok": true})
+}
+
+func (s *Server) handleDiskLocate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		Device string `json:"device"`
+		On     bool   `json:"on"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpError(w, err, http.StatusBadRequest)
+		return
+	}
+	action := "locate_off"
+	if req.On {
+		action = "locate"
+	}
+	err := exec.Command("ledctl", action+"="+req.Device).Run()
+	if err != nil {
+		// Fallback: try sg_ses if ledctl not available
+		httpError(w, fmt.Errorf("ledctl not available or enclosure does not support LED control"), http.StatusInternalServerError)
+		return
+	}
+	jsonResp(w, map[string]bool{"ok": true})
 }
 
 func (s *Server) handlePreviewCreate(w http.ResponseWriter, r *http.Request) {
@@ -674,6 +735,21 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 			s.logs.Clear()
 		}
 		jsonResp(w, map[string]string{"status": "cleared"})
+		return
+	}
+	if r.Method == http.MethodPost {
+		var req struct {
+			Level   string `json:"level"`
+			Message string `json:"message"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err == nil && req.Message != "" {
+			if req.Level == "error" {
+				s.logError("%s", req.Message)
+			} else {
+				s.logInfo("%s", req.Message)
+			}
+		}
+		jsonResp(w, map[string]string{"status": "ok"})
 		return
 	}
 	if r.Method != http.MethodGet {
@@ -1051,6 +1127,194 @@ func (s *Server) handleProtocolToggle(w http.ResponseWriter, r *http.Request) {
 	jsonResp(w, map[string]bool{"ok": true})
 }
 
+func (s *Server) handleProtocolConfig(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		smbConf, _ := os.ReadFile("/etc/samba/poolforge.conf")
+		exportsData, _ := os.ReadFile("/etc/exports")
+		cfg := map[string]interface{}{
+			"smb_running":        s.shares != nil && s.shares.SMBRunning(),
+			"nfs_running":        s.shares != nil && s.shares.NFSRunning(),
+			"smb_workgroup":      readConfVal("POOLFORGE_SMB_WORKGROUP", "WORKGROUP"),
+			"smb_server_name":    readConfVal("POOLFORGE_SMB_SERVER_NAME", "PoolForge NAS"),
+			"smb_min_protocol":   readConfVal("POOLFORGE_SMB_MIN_PROTOCOL", ""),
+			"smb_max_connections": readConfValInt("POOLFORGE_SMB_MAX_CONNECTIONS", 0),
+			"nfs_version":        readConfVal("POOLFORGE_NFS_VERSION", ""),
+			"nfs_threads":        readConfValInt("POOLFORGE_NFS_THREADS", 8),
+			"nfs_default_clients": readConfVal("POOLFORGE_NFS_DEFAULT_CLIENTS", "*"),
+			"nfs_root_squash":    readConfVal("POOLFORGE_NFS_ROOT_SQUASH", "yes") == "yes",
+			"smb_config_preview": string(smbConf),
+			"nfs_exports_preview": string(exportsData),
+		}
+		jsonResp(w, cfg)
+	case http.MethodPost:
+		var req map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			httpError(w, err, http.StatusBadRequest)
+			return
+		}
+		for k, v := range req {
+			switch k {
+			case "smb_workgroup":
+				writeConfVal("POOLFORGE_SMB_WORKGROUP", fmt.Sprintf("%v", v))
+			case "smb_server_name":
+				writeConfVal("POOLFORGE_SMB_SERVER_NAME", fmt.Sprintf("%v", v))
+			case "smb_min_protocol":
+				writeConfVal("POOLFORGE_SMB_MIN_PROTOCOL", fmt.Sprintf("%v", v))
+			case "smb_max_connections":
+				writeConfVal("POOLFORGE_SMB_MAX_CONNECTIONS", fmt.Sprintf("%.0f", v))
+			case "nfs_version":
+				writeConfVal("POOLFORGE_NFS_VERSION", fmt.Sprintf("%v", v))
+			case "nfs_threads":
+				writeConfVal("POOLFORGE_NFS_THREADS", fmt.Sprintf("%.0f", v))
+			case "nfs_default_clients":
+				writeConfVal("POOLFORGE_NFS_DEFAULT_CLIENTS", fmt.Sprintf("%v", v))
+			case "nfs_root_squash":
+				if v == true {
+					writeConfVal("POOLFORGE_NFS_ROOT_SQUASH", "yes")
+				} else {
+					writeConfVal("POOLFORGE_NFS_ROOT_SQUASH", "no")
+				}
+			}
+		}
+		// Re-apply share configs to pick up new settings
+		if s.shares != nil {
+			pools, _ := s.engine.ListPools(r.Context())
+			for _, p := range pools {
+				pool, _ := s.engine.GetPoolStatus(r.Context(), p.ID)
+				if pool != nil {
+					var shares []sharing.Share
+					for _, sh := range pool.Pool.Shares {
+						shares = append(shares, sharing.Share{
+							Name: sh.Name, Path: sh.Path, NFSClients: sh.NFSClients,
+							SMBPublic: sh.SMBPublic, SMBBrowsable: sh.SMBBrowsable, ReadOnly: sh.ReadOnly,
+						})
+					}
+					s.shares.ApplyConfig(shares)
+				}
+			}
+		}
+		jsonResp(w, map[string]bool{"ok": true})
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func readConfVal(key, fallback string) string {
+	data, err := os.ReadFile("/etc/poolforge.conf")
+	if err != nil {
+		return fallback
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "#") || !strings.Contains(line, "=") {
+			continue
+		}
+		parts := strings.SplitN(line, "=", 2)
+		if strings.TrimSpace(parts[0]) == key {
+			return strings.TrimSpace(parts[1])
+		}
+	}
+	return fallback
+}
+
+func readConfValInt(key string, fallback int) int {
+	s := readConfVal(key, "")
+	if s == "" {
+		return fallback
+	}
+	v := 0
+	fmt.Sscanf(s, "%d", &v)
+	if v == 0 {
+		return fallback
+	}
+	return v
+}
+
+func writeConfVal(key, value string) {
+	data, _ := os.ReadFile("/etc/poolforge.conf")
+	lines := strings.Split(string(data), "\n")
+	found := false
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, key+"=") {
+			if value == "" || value == "0" {
+				lines = append(lines[:i], lines[i+1:]...)
+			} else {
+				lines[i] = key + "=" + value
+			}
+			found = true
+			break
+		}
+	}
+	if !found && value != "" && value != "0" {
+		lines = append(lines, key+"="+value)
+	}
+	os.WriteFile("/etc/poolforge.conf", []byte(strings.Join(lines, "\n")), 0644)
+}
+
+func (s *Server) handleAdminSettings(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		cfg := map[string]string{
+			"username":  readConfVal("POOLFORGE_USER", "admin"),
+			"port":      readConfVal("POOLFORGE_ADDR", "0.0.0.0:8080"),
+			"node_name": readConfVal("POOLFORGE_NODE_NAME", ""),
+		}
+		jsonResp(w, cfg)
+	case http.MethodPost:
+		var req struct {
+			Username    string `json:"username"`
+			Password    string `json:"password"`
+			NewPassword string `json:"new_password"`
+			Port        string `json:"port"`
+			NodeName    string `json:"node_name"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			httpError(w, err, http.StatusBadRequest)
+			return
+		}
+		changed := false
+		if req.Username != "" {
+			writeConfVal("POOLFORGE_USER", req.Username)
+			changed = true
+		}
+		if req.NewPassword != "" {
+			writeConfVal("POOLFORGE_PASS", req.NewPassword)
+			changed = true
+		}
+		if req.Port != "" {
+			if !strings.Contains(req.Port, ":") {
+				req.Port = "0.0.0.0:" + req.Port
+			}
+			writeConfVal("POOLFORGE_ADDR", req.Port)
+			changed = true
+		}
+		if req.NodeName != "" {
+			writeConfVal("POOLFORGE_NODE_NAME", req.NodeName)
+		}
+		msg := "Settings saved"
+		if changed {
+			msg = "Settings saved — restart required for changes to take effect"
+		}
+		jsonResp(w, map[string]string{"status": msg})
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) handleAdminRestart(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	jsonResp(w, map[string]bool{"ok": true})
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		exec.Command("systemctl", "restart", "poolforge").Run()
+	}()
+}
+
 // --- Phase 6: Snapshots ---
 
 func (s *Server) handleSnapshots(w http.ResponseWriter, r *http.Request, poolID string, parts []string) {
@@ -1106,6 +1370,7 @@ func (s *Server) handleSnapshots(w http.ResponseWriter, r *http.Request, poolID 
 			case "mount":
 				mountPath, err := s.engine.MountSnapshot(r.Context(), poolID, snapName)
 				if err != nil {
+					s.logError("mount snapshot %q: %v", snapName, err)
 					httpError(w, err, http.StatusInternalServerError)
 					return
 				}
@@ -1113,6 +1378,7 @@ func (s *Server) handleSnapshots(w http.ResponseWriter, r *http.Request, poolID 
 				jsonResp(w, map[string]string{"status": "mounted", "mount_path": mountPath})
 			case "unmount":
 				if err := s.engine.UnmountSnapshot(r.Context(), poolID, snapName); err != nil {
+					s.logError("unmount snapshot %q: %v", snapName, err)
 					httpError(w, err, http.StatusInternalServerError)
 					return
 				}
@@ -1463,6 +1729,37 @@ func (s *Server) handlePairExchange(w http.ResponseWriter, r *http.Request) {
 	jsonResp(w, map[string]string{"public_key": pubKey, "name": host, "host": host})
 }
 
+func (s *Server) handlePairJoin(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost || s.pairing == nil {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		Code string `json:"code"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpError(w, err, http.StatusBadRequest)
+		return
+	}
+	localHost := r.Host
+	if idx := strings.Index(localHost, ":"); idx > 0 {
+		localHost = localHost[:idx]
+	}
+	// Use private IP if available
+	if addrs, err := exec.Command("hostname", "-I").Output(); err == nil {
+		if fields := strings.Fields(string(addrs)); len(fields) > 0 {
+			localHost = fields[0]
+		}
+	}
+	localName := localHost
+	localAddr := localHost + ":8080"
+	if err := s.pairing.JoinRemote(req.Code, localName, localAddr); err != nil {
+		httpError(w, err, http.StatusBadRequest)
+		return
+	}
+	jsonResp(w, map[string]bool{"ok": true})
+}
+
 func (s *Server) handlePairNodes(w http.ResponseWriter, r *http.Request) {
 	if s.pairing == nil {
 		jsonResp(w, []engine.PairedNode{})
@@ -1538,8 +1835,18 @@ func (s *Server) handleSyncJob(w http.ResponseWriter, r *http.Request) {
 			PoolMount string `json:"pool_mount"`
 		}
 		json.NewDecoder(r.Body).Decode(&req)
+		// Auto-resolve pool mount from job's local_pool if not provided
+		if req.PoolMount == "" {
+			if job := s.sync.FindJob(jobID); job != nil && job.LocalPool != "" {
+				if st, err := s.engine.GetPoolStatus(r.Context(), job.LocalPool); err == nil {
+					req.PoolMount = st.Pool.MountPoint
+				}
+			}
+		}
 		run := s.sync.RunJob(jobID, req.PoolMount)
 		jsonResp(w, run)
+	case action == "progress" && r.Method == http.MethodGet:
+		jsonResp(w, s.sync.GetProgress(jobID))
 	case action == "history" && r.Method == http.MethodGet:
 		history := s.sync.History(jobID)
 		if history == nil {

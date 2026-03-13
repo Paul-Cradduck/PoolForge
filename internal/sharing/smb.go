@@ -21,9 +21,18 @@ type SMBBackend struct{}
 func (b *SMBBackend) WriteConfig(shares []Share) error {
 	workgroup := readConfValue("POOLFORGE_SMB_WORKGROUP", defaultWorkgroup)
 	serverStr := readConfValue("POOLFORGE_SMB_SERVER_NAME", defaultServerStr)
+	minProto := readConfValue("POOLFORGE_SMB_MIN_PROTOCOL", "")
+	maxConn := readConfValue("POOLFORGE_SMB_MAX_CONNECTIONS", "")
 
 	var buf strings.Builder
-	fmt.Fprintf(&buf, "[global]\n   workgroup = %s\n   server string = %s\n\n", workgroup, serverStr)
+	fmt.Fprintf(&buf, "[global]\n   workgroup = %s\n   server string = %s\n", workgroup, serverStr)
+	if minProto != "" {
+		fmt.Fprintf(&buf, "   min protocol = %s\n", minProto)
+	}
+	if maxConn != "" && maxConn != "0" {
+		fmt.Fprintf(&buf, "   max connections = %s\n", maxConn)
+	}
+	buf.WriteString("\n")
 
 	for _, s := range shares {
 		guestOK := "no"

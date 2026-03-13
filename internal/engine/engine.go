@@ -44,6 +44,9 @@ type EngineService interface {
 	RestoreSnapshot(ctx context.Context, poolID string, name string) error
 	RenameSnapshot(ctx context.Context, poolID string, oldName, newName string) error
 
+	// Disk identification
+	SetDiskLabel(ctx context.Context, device string, label string) error
+
 	// Pool Start/Stop
 	StartPool(ctx context.Context, poolName string, force bool) (*StartPoolResult, error)
 	StopPool(ctx context.Context, poolName string) error

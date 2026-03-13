@@ -46,6 +46,7 @@ func (m *mockEngine) MountSnapshot(ctx context.Context, poolID string, name stri
 func (m *mockEngine) UnmountSnapshot(ctx context.Context, poolID string, name string) error { return nil }
 func (m *mockEngine) RestoreSnapshot(ctx context.Context, poolID string, name string) error { return nil }
 func (m *mockEngine) RenameSnapshot(ctx context.Context, poolID string, oldName, newName string) error { return nil }
+func (m *mockEngine) SetDiskLabel(ctx context.Context, device string, label string) error { return nil }
 
 func (m *mockEngine) StartPool(ctx context.Context, poolName string, force bool) (*engine.StartPoolResult, error) {
 	if m.startErr != nil {
